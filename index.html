@@ -16,7 +16,7 @@
   </head>
   <body>
     <main class="game-shell" aria-label="エイリアンキックバスター">
-      <canvas id="game" aria-label="ゲーム画面"></canvas>
+      <div id="game" aria-label="ゲーム画面"></div>
       <section class="hud" aria-live="polite">
         <div class="hud__top">
           <div>
@@ -34,7 +34,7 @@
         </div>
         <div class="hud__boss">
           <div class="hud__boss-copy">
-            <span id="alienName">ネオン・グラブ</span>
+            <span id="alienName">ネオン・クラーケン</span>
             <span id="alienState">READY</span>
           </div>
           <div class="hp-track"><span id="hpBar"></span></div>
@@ -56,6 +56,7 @@
         });
       }
     </script>
-    <script type="module" src="./src/game.js?v=shotfx-1"></script>
+    <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
+    <script type="module" src="./src/game.js?v=phaser-1"></script>
   </body>
 </html>
