@@ -1,0 +1,48 @@
+<!doctype html>
+<html lang="ja">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
+    <meta name="theme-color" content="#07131f" />
+    <meta name="description" content="エイリアンキックバスター: リズムよくボレーシュートを決めるスマホ向けWebゲーム" />
+    <title>エイリアンキックバスター</title>
+    <link rel="stylesheet" href="./styles.css" />
+  </head>
+  <body>
+    <main class="game-shell" aria-label="エイリアンキックバスター">
+      <canvas id="game" aria-label="ゲーム画面"></canvas>
+      <section class="hud" aria-live="polite">
+        <div class="hud__top">
+          <div>
+            <span class="hud__label">SCORE</span>
+            <strong id="score">0</strong>
+          </div>
+          <div>
+            <span class="hud__label">TIME</span>
+            <strong id="time">90</strong>
+          </div>
+          <div>
+            <span class="hud__label">COMBO</span>
+            <strong id="combo">0</strong>
+          </div>
+        </div>
+        <div class="hud__boss">
+          <div class="hud__boss-copy">
+            <span id="alienName">ネオン・グラブ</span>
+            <span id="alienState">READY</span>
+          </div>
+          <div class="hp-track"><span id="hpBar"></span></div>
+        </div>
+      </section>
+      <section id="message" class="message">
+        <p class="message__eyebrow">ALIEN KICK BUSTER</p>
+        <h1><span class="title-line">エイリアン</span><span class="title-line">キックバスター</span></h1>
+        <p>ボールが光るリングに重なった瞬間にタップ。ハードヒットでコンボをつなぎ、エイリアンを吹き飛ばせ。</p>
+        <button id="startButton" type="button">KICK OFF</button>
+      </section>
+      <button id="pauseButton" class="pause" type="button" aria-label="一時停止">II</button>
+      <div id="feedback" class="feedback" aria-hidden="true"></div>
+    </main>
+    <script type="module" src="./src/game.js"></script>
+  </body>
+</html>
