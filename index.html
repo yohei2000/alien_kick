@@ -5,7 +5,13 @@
     <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover, user-scalable=no" />
     <meta name="theme-color" content="#07131f" />
     <meta name="description" content="エイリアンキックバスター: リズムよくボレーシュートを決めるスマホ向けWebゲーム" />
+    <meta name="apple-mobile-web-app-capable" content="yes" />
+    <meta name="apple-mobile-web-app-title" content="エイリアンキックバスター" />
+    <meta name="apple-mobile-web-app-status-bar-style" content="black-translucent" />
     <title>エイリアンキックバスター</title>
+    <link rel="manifest" href="./manifest.webmanifest" />
+    <link rel="icon" href="./assets/icon.svg" type="image/svg+xml" />
+    <link rel="apple-touch-icon" href="./assets/icon.svg" />
     <link rel="stylesheet" href="./styles.css" />
   </head>
   <body>
@@ -43,6 +49,13 @@
       <button id="pauseButton" class="pause" type="button" aria-label="一時停止">II</button>
       <div id="feedback" class="feedback" aria-hidden="true"></div>
     </main>
+    <script>
+      if ("serviceWorker" in navigator) {
+        window.addEventListener("load", () => {
+          navigator.serviceWorker.register("./sw.js").catch(() => {});
+        });
+      }
+    </script>
     <script type="module" src="./src/game.js"></script>
   </body>
 </html>

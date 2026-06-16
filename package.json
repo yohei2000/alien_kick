@@ -5,6 +5,6 @@
   "type": "module",
   "scripts": {
     "dev": "node tools/serve.mjs",
-    "check": "node --check src/game.js && node --check tools/serve.mjs"
+    "check": "node --check src/game.js && node --check tools/serve.mjs && node --check sw.js"
   }
 }

@@ -1,0 +1,19 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 512 512" role="img" aria-labelledby="title desc">
+  <title id="title">エイリアンキックバスター</title>
+  <desc id="desc">ボレーシュートする足とエイリアンの顔のゲームアイコン</desc>
+  <rect width="512" height="512" rx="112" fill="#07131f"/>
+  <path d="M0 332h512v180H0z" fill="#1f7d46"/>
+  <path d="M70 152h372v132H70z" fill="#10283d" stroke="#eef8ff" stroke-width="16" rx="18"/>
+  <path d="M70 196h372M70 240h372M132 152v132M194 152v132M256 152v132M318 152v132M380 152v132" stroke="#eef8ff" stroke-width="4" opacity=".32"/>
+  <ellipse cx="256" cy="276" rx="82" ry="92" fill="#41e7ff" stroke="#9cff6d" stroke-width="10"/>
+  <circle cx="224" cy="260" r="13" fill="#06111d"/>
+  <circle cx="288" cy="260" r="13" fill="#06111d"/>
+  <path d="M220 302c24 28 55 28 80 0" fill="none" stroke="#06111d" stroke-width="11" stroke-linecap="round"/>
+  <circle cx="178" cy="278" r="21" fill="#9cff6d"/>
+  <circle cx="334" cy="278" r="21" fill="#9cff6d"/>
+  <circle cx="210" cy="368" r="54" fill="#eef8ff"/>
+  <path d="M162 368h96M176 336c22 28 45 36 78 32M176 400c22-28 45-36 78-32" stroke="#06111d" stroke-width="9" fill="none" stroke-linecap="round"/>
+  <path d="M286 310l-42 130M334 314l-32 118" stroke="#eef8ff" stroke-width="24" stroke-linecap="round"/>
+  <path d="M303 430h82" stroke="#ff4f79" stroke-width="28" stroke-linecap="round"/>
+  <path d="M254 386c30 38 73 55 136 51" fill="none" stroke="#ffd166" stroke-width="12" stroke-linecap="round" opacity=".9"/>
+</svg>

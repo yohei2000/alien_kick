@@ -10,6 +10,7 @@ const types = {
   ".css": "text/css; charset=utf-8",
   ".js": "text/javascript; charset=utf-8",
   ".json": "application/json; charset=utf-8",
+  ".webmanifest": "application/manifest+json; charset=utf-8",
   ".svg": "image/svg+xml; charset=utf-8",
 };
 
@@ -24,7 +25,7 @@ function resolvePath(url) {
   return target;
 }
 
-createServer((req, res) => {
+export const server = createServer((req, res) => {
   const file = resolvePath(req.url || "/");
   if (!file || !existsSync(file)) {
     res.writeHead(404, { "content-type": "text/plain; charset=utf-8" });
@@ -37,6 +38,8 @@ createServer((req, res) => {
     "cache-control": "no-store",
   });
   createReadStream(file).pipe(res);
-}).listen(port, () => {
+});
+
+server.listen(port, () => {
   console.log(`Alien Kick Buster: http://localhost:${port}`);
 });

@@ -1,0 +1,19 @@
+{
+  "name": "エイリアンキックバスター",
+  "short_name": "キックバスター",
+  "description": "リズムよくボレーシュートを決めるスマホ向けWebゲーム",
+  "start_url": "./",
+  "scope": "./",
+  "display": "standalone",
+  "orientation": "portrait",
+  "background_color": "#07131f",
+  "theme_color": "#07131f",
+  "icons": [
+    {
+      "src": "./assets/icon.svg",
+      "sizes": "any",
+      "type": "image/svg+xml",
+      "purpose": "any maskable"
+    }
+  ]
+}
