@@ -34,7 +34,10 @@
         </div>
         <div class="hud__boss">
           <div class="hud__boss-copy">
-            <span id="alienName">ネオン・クラーケン</span>
+            <span class="hud__boss-identity">
+              <span id="alienName">スライムGK ネブラ</span>
+              <span id="alienTag">粘液ボディ: 低速だが伸びる</span>
+            </span>
             <span id="alienState">READY</span>
           </div>
           <div class="hp-track"><span id="hpBar"></span></div>
@@ -43,7 +46,7 @@
       <section id="message" class="message">
         <p class="message__eyebrow">ALIEN KICK BUSTER</p>
         <h1><span class="title-line">エイリアン</span><span class="title-line">キックバスター</span></h1>
-        <p>ボールが光るリングに重なった瞬間にタップ。ハードヒットでコンボをつなぎ、エイリアンを吹き飛ばせ。</p>
+        <p>ボールが来るリズムに重なった瞬間にタップ。ハードヒットでコンボをつなぎ、エイリアンGKを吹き飛ばせ。</p>
         <button id="startButton" type="button">KICK OFF</button>
       </section>
       <button id="pauseButton" class="pause" type="button" aria-label="一時停止">II</button>
@@ -57,6 +60,6 @@
       }
     </script>
     <script src="https://cdn.jsdelivr.net/npm/phaser@3.90.0/dist/phaser.min.js"></script>
-    <script type="module" src="./src/game.js?v=phaser-1"></script>
+    <script type="module" src="./src/game.js?v=characters-1"></script>
   </body>
 </html>

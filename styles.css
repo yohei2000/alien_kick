@@ -94,11 +94,39 @@ button {
 
 .hud__boss-copy {
   display: flex;
+  align-items: flex-start;
   justify-content: space-between;
   gap: 12px;
   color: var(--ink);
   font-size: 12px;
   font-weight: 800;
+}
+
+.hud__boss-identity {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+#alienName,
+#alienTag {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+#alienTag {
+  color: var(--gold);
+  font-size: 10px;
+  font-weight: 850;
+}
+
+#alienState {
+  flex: 0 0 auto;
+  color: var(--cyan);
+  font-size: 11px;
+  letter-spacing: 0;
 }
 
 .hp-track {

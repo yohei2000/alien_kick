@@ -4,14 +4,20 @@
 
 ## ゲーム内容
 
-- エイリアンがキーパー、プレイヤーがキッカー
+- エイリアンがGK、プレイヤーがキッカー
 - 次々に飛んでくるボールをタイミングよくボレーシュート
-- タイミングが良いほどゴールしやすく、コンボが伸びる
+- 良いタイミングほどゴールしやすく、コンボが伸びる
 - コンボ中のナイスキックでエイリアンにダメージ
 - HPを削るとエイリアンがダウンし、次のエイリアンが登場
 - 90秒以内に100点以上で勝利
-- Phaser 3 のScene/Tween/Graphicsで、タコ型エイリアン、ボール軌道、ゴールエフェクトを描画
-- PWA対応なので、対応ブラウザではスマホのホーム画面に追加して遊べます
+
+## キャラクター実装
+
+- `CharacterAnimator`: 状態遷移の共通ベース
+- `KickerAnimator`: キッカーの `idle / aim / charge / kick / followThrough / goalReact / missReact` を描画
+- `AlienVisualFactory`: Slime / Mantis / Psychic のGKビジュアルを生成
+
+GKはシルエット、色、待機ループ、セーブモーション、接触エフェクト、勝敗表情がそれぞれ異なります。HUDには敵名と短い能力タグを表示します。
 
 ## ローカル起動
 
@@ -23,16 +29,12 @@ npm run dev
 
 ブラウザで `http://localhost:4173` を開いてください。
 
+## チェック
+
+```powershell
+npm run check
+```
+
 ## デプロイ
 
-このリポジトリは静的サイトなので、GitHub Pages、Netlify、Vercel などにそのままデプロイできます。
-
-GitHub Pages の場合:
-
-1. GitHub にリポジトリを作成して `main` ブランチへ push
-2. Actions を有効化
-3. `.github/workflows/deploy.yml` により `main` ブランチへの push で Pages に公開
-
-GitHub Pages を手動設定する場合は、リポジトリの `Settings > Pages` で Source を `GitHub Actions` にしてください。
-
-Netlify/Vercel の場合は、このリポジトリを接続するだけで `npm run check` 後にルートディレクトリが公開されます。
+静的サイトなので GitHub Pages、Netlify、Vercel などにそのままデプロイできます。GitHub Pages は `.github/workflows/deploy.yml` により `main` ブランチへの push で公開されます。
