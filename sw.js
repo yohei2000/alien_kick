@@ -1,4 +1,4 @@
-const CACHE_NAME = "alien-kick-buster-v1";
+const CACHE_NAME = "alien-kick-buster-v3";
 const ASSETS = [
   "./",
   "./index.html",

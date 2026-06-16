@@ -21,40 +21,44 @@ const BALL_LIFE = 1.28;
 
 const aliens = [
   {
-    name: "ネオン・グラブ",
+    name: "ネオン・クラーケン",
     hp: 82,
-    color: "#41e7ff",
+    color: "#43d4c8",
+    shadow: "#155a63",
     accent: "#9cff6d",
     block: 0.24,
     tempo: 0.86,
-    shape: "glove",
+    shape: "octopus",
   },
   {
-    name: "メテオ・モグル",
+    name: "メテオ・テンタクル",
     hp: 112,
-    color: "#ff7b54",
+    color: "#c85d53",
+    shadow: "#512037",
     accent: "#ffd166",
     block: 0.32,
     tempo: 0.8,
-    shape: "horn",
+    shape: "octopus",
   },
   {
-    name: "ゼロG・アイ",
+    name: "ゼロG・オクトアイ",
     hp: 140,
-    color: "#b08cff",
+    color: "#8c6dca",
+    shadow: "#2b1d5b",
     accent: "#41e7ff",
     block: 0.39,
     tempo: 0.74,
-    shape: "eye",
+    shape: "octopus",
   },
   {
-    name: "ギャラクシー番長",
+    name: "深宇宙ダイオウ",
     hp: 170,
-    color: "#ff4f79",
+    color: "#b43d72",
+    shadow: "#371a45",
     accent: "#fff06a",
     block: 0.46,
     tempo: 0.68,
-    shape: "boss",
+    shape: "octopus",
   },
 ];
 
@@ -70,7 +74,9 @@ const state = {
   beat: 0,
   nextSpawn: 0.3,
   balls: [],
+  shots: [],
   particles: [],
+  goalBursts: [],
   alienIndex: 0,
   alienHp: aliens[0].hp,
   alienDownUntil: 0,
@@ -105,7 +111,9 @@ function resetGame() {
   state.beat = 0;
   state.nextSpawn = 0.2;
   state.balls = [];
+  state.shots = [];
   state.particles = [];
+  state.goalBursts = [];
   state.alienIndex = 0;
   state.alienHp = aliens[0].hp;
   state.alienDownUntil = 0;
@@ -210,11 +218,11 @@ function resolveShot(ball, timing, diff) {
   const alien = aliens[state.alienIndex];
   const down = state.alienDownUntil > state.beat;
   const powerBand = 1 + Math.floor(state.combo / 6) * 0.18;
-  const timingPower = timing === "hard" ? 1.55 : timing === "good" ? 1.12 : 0.86;
   const aimLane = state.aimX < 0.38 ? 0 : state.aimX > 0.62 ? 2 : 1;
   const bait = aimLane === ball.lane ? 0.06 : 0;
   const blockChance = clamp(alien.block + bait - (down ? 0.3 : 0) - (timing === "hard" ? 0.2 : 0), 0.04, 0.72);
   const goal = Math.random() > blockChance;
+  createShot(ball, timing, goal, aimLane);
 
   if (goal) {
     const points = timing === "hard" ? 5 : timing === "good" ? 3 : 2;
@@ -226,6 +234,7 @@ function resolveShot(ball, timing, diff) {
     popFeedback(timing === "hard" ? "HARD HIT!" : timing === "good" ? "NICE!" : "GOAL", timing === "hard" ? "#ffd166" : "#41e7ff");
     blip(timing === "hard" ? 720 : 540, 0.08, 0.07, "square");
     emitShotParticles(ball, timing, true);
+    emitGoalBurst(timing, aimLane);
   } else {
     registerMiss();
     state.shake = 5;
@@ -242,6 +251,36 @@ function resolveShot(ball, timing, diff) {
 
   if (state.score >= TARGET_SCORE) endGame(true);
   syncHud();
+}
+
+function createShot(ball, timing, goal, aimLane) {
+  const start = ballPosition(ball);
+  const goalBox = getGoalBox();
+  const alien = getAlienPose();
+  const laneX = goalBox.x + goalBox.w * (0.22 + aimLane * 0.28);
+  const target = goal
+    ? {
+        x: laneX + (Math.random() - 0.5) * goalBox.w * 0.16,
+        y: goalBox.y + goalBox.h * (timing === "hard" ? 0.32 : 0.46),
+      }
+    : {
+        x: alien.x + (aimLane - 1) * state.w * 0.035,
+        y: alien.y - alien.s * 0.1,
+      };
+  state.shots.push({
+    startX: start.x,
+    startY: start.y,
+    targetX: target.x,
+    targetY: target.y,
+    controlX: (start.x + target.x) / 2 + (aimLane - 1) * state.w * 0.08,
+    controlY: Math.min(start.y, target.y) - state.h * (timing === "hard" ? 0.22 : 0.16),
+    born: state.beat,
+    duration: timing === "hard" ? 0.42 : 0.5,
+    spin: ball.spin,
+    hard: timing === "hard",
+    goal,
+    trail: [],
+  });
 }
 
 function knockDownAlien() {
@@ -282,6 +321,35 @@ function emitShotParticles(ball, timing, goal) {
       life: 0.35 + Math.random() * 0.45,
       color: timing === "hard" ? "#ffd166" : goal ? "#41e7ff" : "#ff4f79",
       r: 2 + Math.random() * 4,
+    });
+  }
+}
+
+function emitGoalBurst(timing, aimLane) {
+  const goalBox = getGoalBox();
+  const x = goalBox.x + goalBox.w * (0.22 + aimLane * 0.28);
+  const y = goalBox.y + goalBox.h * 0.42;
+  const hard = timing === "hard";
+  state.goalBursts.push({
+    x,
+    y,
+    born: state.beat,
+    life: hard ? 0.78 : 0.58,
+    hard,
+  });
+
+  const count = hard ? 58 : 36;
+  for (let i = 0; i < count; i += 1) {
+    const angle = Math.random() * Math.PI * 2;
+    const speed = (hard ? 190 : 130) + Math.random() * (hard ? 360 : 230);
+    state.particles.push({
+      x,
+      y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed - Math.random() * 120,
+      life: 0.42 + Math.random() * 0.5,
+      color: i % 3 === 0 ? "#ffd166" : i % 3 === 1 ? "#41e7ff" : "#ffffff",
+      r: 2 + Math.random() * (hard ? 6 : 4),
     });
   }
 }
@@ -343,6 +411,17 @@ function update(dt) {
   }
   state.balls = state.balls.filter((ball) => state.beat - ball.born < BALL_LIFE + 0.75);
 
+  for (const shot of state.shots) {
+    const t = clamp((state.beat - shot.born) / shot.duration, 0, 1);
+    const p = shotPosition(shot, easeOutCubic(t));
+    shot.trail.push({ x: p.x, y: p.y, r: p.r, life: 0.22 });
+    shot.trail = shot.trail
+      .map((trail) => ({ ...trail, life: trail.life - dt }))
+      .filter((trail) => trail.life > 0)
+      .slice(-10);
+  }
+  state.shots = state.shots.filter((shot) => state.beat - shot.born < shot.duration + 0.3);
+
   for (const p of state.particles) {
     p.x += p.vx * dt;
     p.y += p.vy * dt;
@@ -350,6 +429,7 @@ function update(dt) {
     p.life -= dt;
   }
   state.particles = state.particles.filter((p) => p.life > 0);
+  state.goalBursts = state.goalBursts.filter((burst) => state.beat - burst.born < burst.life);
 
   if (state.alienSwapTimer > 0) {
     state.alienSwapTimer -= dt;
@@ -368,9 +448,11 @@ function draw() {
   ctx.translate(shakeX, shakeY);
   drawBackground();
   drawGoal();
+  drawGoalEffects();
   drawAlien();
   drawRhythmLane();
   drawBalls();
+  drawShots();
   drawPlayer();
   drawParticles();
   drawAim();
@@ -413,97 +495,162 @@ function drawBackground() {
 }
 
 function drawGoal() {
-  const gx = state.w * 0.5;
-  const gy = state.h * 0.25;
-  const gw = Math.min(state.w * 0.78, 470);
-  const gh = Math.min(state.h * 0.24, 155);
+  const goal = getGoalBox();
   ctx.strokeStyle = "rgba(238,248,255,0.84)";
   ctx.lineWidth = 6;
-  roundRect(gx - gw / 2, gy, gw, gh, 8, true, false);
+  roundRect(goal.x, goal.y, goal.w, goal.h, 8, true, false);
   ctx.lineWidth = 1.5;
   ctx.strokeStyle = "rgba(238,248,255,0.18)";
   for (let i = 1; i < 7; i += 1) {
-    const x = gx - gw / 2 + (gw / 7) * i;
+    const x = goal.x + (goal.w / 7) * i;
     ctx.beginPath();
-    ctx.moveTo(x, gy + 4);
-    ctx.lineTo(x, gy + gh - 4);
+    ctx.moveTo(x, goal.y + 4);
+    ctx.lineTo(x, goal.y + goal.h - 4);
     ctx.stroke();
   }
   for (let i = 1; i < 4; i += 1) {
-    const y = gy + (gh / 4) * i;
+    const y = goal.y + (goal.h / 4) * i;
     ctx.beginPath();
-    ctx.moveTo(gx - gw / 2 + 4, y);
-    ctx.lineTo(gx + gw / 2 - 4, y);
+    ctx.moveTo(goal.x + 4, y);
+    ctx.lineTo(goal.x + goal.w - 4, y);
     ctx.stroke();
   }
 }
 
 function drawAlien() {
   const alien = aliens[state.alienIndex];
-  const down = state.alienDownUntil > state.beat;
-  const gx = state.w * 0.5 + Math.sin(state.beat * 2.2) * (down ? 5 : 22);
-  const gy = state.h * (down ? 0.43 : 0.37);
-  const s = Math.min(state.w, state.h) * (down ? 0.105 : 0.13);
+  const pose = getAlienPose();
+  const { down, x: gx, y: gy, s } = pose;
   ctx.save();
   ctx.translate(gx, gy);
-  ctx.rotate(down ? Math.sin(state.beat * 7) * 0.08 + 0.52 : Math.sin(state.beat * 3) * 0.06);
+  ctx.rotate(down ? Math.sin(state.beat * 7) * 0.08 + 0.62 : Math.sin(state.beat * 2.4) * 0.05);
 
   ctx.fillStyle = "rgba(0,0,0,0.24)";
   ctx.beginPath();
-  ctx.ellipse(0, s * 1.18, s * 1.1, s * 0.24, 0, 0, Math.PI * 2);
+  ctx.ellipse(0, s * 1.16, s * 1.45, s * 0.28, 0, 0, Math.PI * 2);
   ctx.fill();
 
-  ctx.fillStyle = alien.color;
-  ctx.strokeStyle = alien.accent;
-  ctx.lineWidth = Math.max(3, s * 0.055);
-  ctx.beginPath();
-  ctx.ellipse(0, 0, s * 0.78, s, 0, 0, Math.PI * 2);
-  ctx.fill();
-  ctx.stroke();
-
-  if (alien.shape === "horn" || alien.shape === "boss") {
-    ctx.fillStyle = alien.accent;
-    ctx.beginPath();
-    ctx.moveTo(-s * 0.55, -s * 0.7);
-    ctx.lineTo(-s * 0.9, -s * 1.32);
-    ctx.lineTo(-s * 0.18, -s * 0.94);
-    ctx.fill();
-    ctx.beginPath();
-    ctx.moveTo(s * 0.55, -s * 0.7);
-    ctx.lineTo(s * 0.9, -s * 1.32);
-    ctx.lineTo(s * 0.18, -s * 0.94);
-    ctx.fill();
-  }
-
-  ctx.fillStyle = "#06111d";
-  if (alien.shape === "eye") {
-    ctx.fillStyle = "#eef8ff";
-    ctx.beginPath();
-    ctx.ellipse(0, -s * 0.1, s * 0.42, s * 0.32, 0, 0, Math.PI * 2);
-    ctx.fill();
-    ctx.fillStyle = "#06111d";
-    ctx.beginPath();
-    ctx.arc(Math.sin(state.beat * 5) * s * 0.1, -s * 0.1, s * 0.15, 0, Math.PI * 2);
-    ctx.fill();
-  } else {
-    ctx.beginPath();
-    ctx.arc(-s * 0.28, -s * 0.18, s * 0.12, 0, Math.PI * 2);
-    ctx.arc(s * 0.28, -s * 0.18, s * 0.12, 0, Math.PI * 2);
-    ctx.fill();
-  }
-
-  ctx.strokeStyle = "#06111d";
-  ctx.lineWidth = Math.max(3, s * 0.055);
-  ctx.beginPath();
-  ctx.arc(0, s * 0.18, s * 0.28, 0.12 * Math.PI, 0.88 * Math.PI);
-  ctx.stroke();
-
-  ctx.fillStyle = alien.accent;
-  ctx.beginPath();
-  ctx.arc(-s * 0.92, s * 0.1 + Math.sin(state.beat * 8) * 5, s * 0.2, 0, Math.PI * 2);
-  ctx.arc(s * 0.92, s * 0.1 - Math.sin(state.beat * 8) * 5, s * 0.2, 0, Math.PI * 2);
-  ctx.fill();
+  drawTentacles(alien, s, down);
+  drawOctopusHead(alien, s, down);
   ctx.restore();
+}
+
+function drawTentacles(alien, s, down) {
+  const sway = down ? 0.45 : 1;
+  for (let i = 0; i < 8; i += 1) {
+    const side = i < 4 ? -1 : 1;
+    const row = i % 4;
+    const rootX = side * s * (0.18 + row * 0.12);
+    const rootY = s * (0.46 + row * 0.08);
+    const wave = Math.sin(state.beat * 4 + i * 0.9) * s * 0.13 * sway;
+    const endX = side * s * (0.62 + row * 0.25) + wave;
+    const endY = s * (1.12 + Math.sin(state.beat * 3.3 + i) * 0.12);
+    const midX = side * s * (0.34 + row * 0.2) - wave * 0.35;
+    const midY = s * (0.78 + row * 0.05);
+
+    ctx.save();
+    ctx.lineCap = "round";
+    ctx.lineWidth = s * (0.18 - row * 0.018);
+    ctx.strokeStyle = alien.shadow;
+    ctx.beginPath();
+    ctx.moveTo(rootX, rootY);
+    ctx.quadraticCurveTo(midX, midY, endX, endY);
+    ctx.stroke();
+    ctx.lineWidth *= 0.68;
+    ctx.strokeStyle = alien.color;
+    ctx.beginPath();
+    ctx.moveTo(rootX, rootY - s * 0.02);
+    ctx.quadraticCurveTo(midX, midY - s * 0.02, endX, endY - s * 0.02);
+    ctx.stroke();
+
+    const cups = 3;
+    for (let cup = 1; cup <= cups; cup += 1) {
+      const t = cup / (cups + 1);
+      const x = quadratic(rootX, midX, endX, t);
+      const y = quadratic(rootY, midY, endY, t);
+      ctx.fillStyle = "rgba(255, 230, 218, 0.72)";
+      ctx.beginPath();
+      ctx.ellipse(x - side * s * 0.035, y + s * 0.025, s * 0.035, s * 0.024, 0, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.fillStyle = "rgba(83, 25, 54, 0.28)";
+      ctx.beginPath();
+      ctx.ellipse(x - side * s * 0.035, y + s * 0.025, s * 0.017, s * 0.011, 0, 0, Math.PI * 2);
+      ctx.fill();
+    }
+    ctx.restore();
+  }
+}
+
+function drawOctopusHead(alien, s, down) {
+  const bodyGradient = ctx.createRadialGradient(-s * 0.28, -s * 0.45, s * 0.08, 0, 0, s * 1.08);
+  bodyGradient.addColorStop(0, "#d7fff8");
+  bodyGradient.addColorStop(0.14, alien.accent);
+  bodyGradient.addColorStop(0.42, alien.color);
+  bodyGradient.addColorStop(1, alien.shadow);
+  ctx.fillStyle = bodyGradient;
+  ctx.strokeStyle = "rgba(238,248,255,0.5)";
+  ctx.lineWidth = Math.max(2, s * 0.035);
+  ctx.beginPath();
+  ctx.moveTo(0, -s * 1.02);
+  ctx.bezierCurveTo(s * 0.78, -s * 1, s * 0.98, -s * 0.12, s * 0.78, s * 0.43);
+  ctx.bezierCurveTo(s * 0.52, s * 1.04, -s * 0.52, s * 1.04, -s * 0.78, s * 0.43);
+  ctx.bezierCurveTo(-s * 0.98, -s * 0.12, -s * 0.78, -s * 1, 0, -s * 1.02);
+  ctx.fill();
+  ctx.stroke();
+
+  ctx.globalAlpha = 0.35;
+  ctx.fillStyle = "#ffffff";
+  ctx.beginPath();
+  ctx.ellipse(-s * 0.28, -s * 0.45, s * 0.18, s * 0.34, -0.48, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.globalAlpha = 1;
+
+  for (let i = 0; i < 10; i += 1) {
+    const a = i * 1.71;
+    const x = Math.cos(a) * s * (0.2 + (i % 3) * 0.16);
+    const y = -s * 0.1 + Math.sin(a) * s * (0.18 + (i % 2) * 0.14);
+    ctx.fillStyle = "rgba(255,255,255,0.18)";
+    ctx.beginPath();
+    ctx.arc(x, y, s * (0.025 + (i % 2) * 0.012), 0, Math.PI * 2);
+    ctx.fill();
+  }
+
+  ctx.fillStyle = "#f3fbff";
+  ctx.beginPath();
+  ctx.ellipse(-s * 0.26, -s * 0.12, s * 0.14, s * 0.22, -0.18, 0, Math.PI * 2);
+  ctx.ellipse(s * 0.26, -s * 0.12, s * 0.14, s * 0.22, 0.18, 0, Math.PI * 2);
+  ctx.fill();
+
+  const glare = down ? 0 : Math.sin(state.beat * 4) * s * 0.025;
+  ctx.fillStyle = "#07131f";
+  ctx.beginPath();
+  ctx.ellipse(-s * 0.25 + glare, -s * 0.1, s * 0.062, s * 0.12, 0, 0, Math.PI * 2);
+  ctx.ellipse(s * 0.25 + glare, -s * 0.1, s * 0.062, s * 0.12, 0, 0, Math.PI * 2);
+  ctx.fill();
+
+  ctx.strokeStyle = "rgba(7,19,31,0.72)";
+  ctx.lineWidth = Math.max(3, s * 0.052);
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.45, -s * 0.34);
+  ctx.quadraticCurveTo(-s * 0.25, -s * 0.48, -s * 0.05, -s * 0.32);
+  ctx.moveTo(s * 0.45, -s * 0.34);
+  ctx.quadraticCurveTo(s * 0.25, -s * 0.48, s * 0.05, -s * 0.32);
+  ctx.stroke();
+
+  ctx.fillStyle = "#271229";
+  ctx.beginPath();
+  ctx.moveTo(0, s * 0.1);
+  ctx.lineTo(s * 0.14, s * 0.26);
+  ctx.lineTo(0, s * 0.39);
+  ctx.lineTo(-s * 0.14, s * 0.26);
+  ctx.closePath();
+  ctx.fill();
+  ctx.strokeStyle = "rgba(255, 230, 218, 0.34)";
+  ctx.lineWidth = Math.max(1.5, s * 0.022);
+  ctx.beginPath();
+  ctx.moveTo(-s * 0.1, s * 0.25);
+  ctx.lineTo(s * 0.1, s * 0.25);
+  ctx.stroke();
 }
 
 function drawRhythmLane() {
@@ -561,6 +708,74 @@ function drawBalls() {
   }
 }
 
+function drawShots() {
+  for (const shot of state.shots) {
+    const t = clamp((state.beat - shot.born) / shot.duration, 0, 1);
+    const eased = easeOutCubic(t);
+    const p = shotPosition(shot, eased);
+
+    for (const trail of shot.trail) {
+      ctx.save();
+      ctx.globalAlpha = clamp(trail.life * 4, 0, 0.75);
+      ctx.fillStyle = shot.hard ? "#ffd166" : "#41e7ff";
+      ctx.beginPath();
+      ctx.arc(trail.x, trail.y, trail.r * 0.8, 0, Math.PI * 2);
+      ctx.fill();
+      ctx.restore();
+    }
+
+    ctx.save();
+    ctx.translate(p.x, p.y);
+    ctx.rotate(shot.spin + state.beat * (shot.hard ? 18 : 13));
+    ctx.shadowColor = shot.hard ? "#ffd166" : "#41e7ff";
+    ctx.shadowBlur = shot.hard ? 22 : 12;
+    drawSoccerBall(0, 0, p.r);
+    ctx.restore();
+  }
+}
+
+function drawGoalEffects() {
+  const goal = getGoalBox();
+  for (const burst of state.goalBursts) {
+    const t = clamp((state.beat - burst.born) / burst.life, 0, 1);
+    const alpha = 1 - t;
+    const radius = lerp(18, burst.hard ? goal.w * 0.62 : goal.w * 0.42, easeOutCubic(t));
+
+    ctx.save();
+    ctx.globalCompositeOperation = "lighter";
+    ctx.globalAlpha = alpha * 0.85;
+    ctx.strokeStyle = burst.hard ? "#ffd166" : "#41e7ff";
+    ctx.lineWidth = lerp(10, 2, t);
+    ctx.beginPath();
+    ctx.arc(burst.x, burst.y, radius, 0, Math.PI * 2);
+    ctx.stroke();
+
+    ctx.globalAlpha = alpha * 0.48;
+    ctx.fillStyle = burst.hard ? "#fff6cf" : "#c7fbff";
+    for (let i = 0; i < 14; i += 1) {
+      const a = (i / 14) * Math.PI * 2 + state.beat * 0.8;
+      ctx.beginPath();
+      ctx.moveTo(burst.x, burst.y);
+      ctx.lineTo(burst.x + Math.cos(a) * radius * 1.12, burst.y + Math.sin(a) * radius * 0.72);
+      ctx.lineTo(burst.x + Math.cos(a + 0.08) * radius * 0.36, burst.y + Math.sin(a + 0.08) * radius * 0.28);
+      ctx.closePath();
+      ctx.fill();
+    }
+
+    ctx.globalAlpha = alpha * 0.55;
+    ctx.strokeStyle = "#ffffff";
+    ctx.lineWidth = 2;
+    for (let i = 0; i < 5; i += 1) {
+      const y = goal.y + goal.h * (0.18 + i * 0.16) + Math.sin(state.beat * 18 + i) * 8 * alpha;
+      ctx.beginPath();
+      ctx.moveTo(goal.x + 8, y);
+      ctx.quadraticCurveTo(goal.x + goal.w * 0.5, y + 18 * alpha, goal.x + goal.w - 8, y);
+      ctx.stroke();
+    }
+    ctx.restore();
+  }
+}
+
 function drawPlayer() {
   const ring = strikeRing();
   const footX = ring.x - 26 + Math.sin(state.beat * 9) * 8;
@@ -612,6 +827,24 @@ function drawParticles() {
   ctx.globalAlpha = 1;
 }
 
+function drawSoccerBall(x, y, r) {
+  ctx.fillStyle = "#eef8ff";
+  ctx.beginPath();
+  ctx.arc(x, y, r, 0, Math.PI * 2);
+  ctx.fill();
+  ctx.strokeStyle = "#06111d";
+  ctx.lineWidth = Math.max(1.5, r * 0.08);
+  ctx.beginPath();
+  ctx.arc(x, y, r * 0.42, 0, Math.PI * 2);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(x - r, y);
+  ctx.quadraticCurveTo(x, y - r * 0.45, x + r, y);
+  ctx.moveTo(x - r, y);
+  ctx.quadraticCurveTo(x, y + r * 0.45, x + r, y);
+  ctx.stroke();
+}
+
 function strikeRing() {
   return {
     x: state.w * 0.5,
@@ -633,6 +866,38 @@ function ballPosition(ball) {
     x: lerp(sx, ex, t) + laneOffset * (1 - t) * 0.3,
     y: lerp(sy, ey, t) - curve,
     r: lerp(10, Math.min(state.w * 0.07, 28), t),
+  };
+}
+
+function shotPosition(shot, t) {
+  const x = quadratic(shot.startX, shot.controlX, shot.targetX, t);
+  const y = quadratic(shot.startY, shot.controlY, shot.targetY, t);
+  const scale = shot.goal ? lerp(1.05, 0.55, t) : lerp(1, 0.82, t);
+  return {
+    x,
+    y,
+    r: Math.min(state.w * 0.065, 24) * scale,
+  };
+}
+
+function getGoalBox() {
+  const w = Math.min(state.w * 0.78, 470);
+  const h = Math.min(state.h * 0.24, 155);
+  return {
+    x: state.w * 0.5 - w / 2,
+    y: state.h * 0.25,
+    w,
+    h,
+  };
+}
+
+function getAlienPose() {
+  const down = state.alienDownUntil > state.beat;
+  return {
+    down,
+    x: state.w * 0.5 + Math.sin(state.beat * 2.2) * (down ? 5 : 22),
+    y: state.h * (down ? 0.43 : 0.37),
+    s: Math.min(state.w, state.h) * (down ? 0.108 : 0.132),
   };
 }
 
@@ -661,6 +926,14 @@ function loop(now) {
 
 function lerp(a, b, t) {
   return a + (b - a) * t;
+}
+
+function quadratic(a, b, c, t) {
+  return (1 - t) * (1 - t) * a + 2 * (1 - t) * t * b + t * t * c;
+}
+
+function easeOutCubic(t) {
+  return 1 - (1 - t) ** 3;
 }
 
 function clamp(v, min, max) {

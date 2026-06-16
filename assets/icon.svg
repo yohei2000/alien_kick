@@ -5,12 +5,14 @@
   <path d="M0 332h512v180H0z" fill="#1f7d46"/>
   <path d="M70 152h372v132H70z" fill="#10283d" stroke="#eef8ff" stroke-width="16" rx="18"/>
   <path d="M70 196h372M70 240h372M132 152v132M194 152v132M256 152v132M318 152v132M380 152v132" stroke="#eef8ff" stroke-width="4" opacity=".32"/>
-  <ellipse cx="256" cy="276" rx="82" ry="92" fill="#41e7ff" stroke="#9cff6d" stroke-width="10"/>
-  <circle cx="224" cy="260" r="13" fill="#06111d"/>
-  <circle cx="288" cy="260" r="13" fill="#06111d"/>
-  <path d="M220 302c24 28 55 28 80 0" fill="none" stroke="#06111d" stroke-width="11" stroke-linecap="round"/>
-  <circle cx="178" cy="278" r="21" fill="#9cff6d"/>
-  <circle cx="334" cy="278" r="21" fill="#9cff6d"/>
+  <path d="M256 174c76 0 96 69 78 122-20 62-136 62-156 0-18-53 2-122 78-122z" fill="#41e7ff" stroke="#9cff6d" stroke-width="10"/>
+  <path d="M188 320c-22 18-47 19-71 5M217 328c-25 35-56 45-96 34M295 328c25 35 56 45 96 34M324 320c22 18 47 19 71 5" fill="none" stroke="#41e7ff" stroke-width="16" stroke-linecap="round"/>
+  <path d="M196 231c22-18 43-17 60 5M316 231c-22-18-43-17-60 5" fill="none" stroke="#06111d" stroke-width="10" stroke-linecap="round"/>
+  <ellipse cx="224" cy="262" rx="15" ry="22" fill="#f3fbff"/>
+  <ellipse cx="288" cy="262" rx="15" ry="22" fill="#f3fbff"/>
+  <ellipse cx="226" cy="264" rx="7" ry="12" fill="#06111d"/>
+  <ellipse cx="286" cy="264" rx="7" ry="12" fill="#06111d"/>
+  <path d="M256 292l19 22-19 18-19-18z" fill="#271229"/>
   <circle cx="210" cy="368" r="54" fill="#eef8ff"/>
   <path d="M162 368h96M176 336c22 28 45 36 78 32M176 400c22-28 45-36 78-32" stroke="#06111d" stroke-width="9" fill="none" stroke-linecap="round"/>
   <path d="M286 310l-42 130M334 314l-32 118" stroke="#eef8ff" stroke-width="24" stroke-linecap="round"/>
