@@ -17,6 +17,65 @@ const PERFECT_WINDOW = 0.055;
 const GOOD_WINDOW = 0.105;
 const BALL_LIFE = 1.28;
 const HIT_STOP_SECONDS = 0.08;
+const MUSIC_BPM = 118;
+const BEAT_SECONDS = 60 / MUSIC_BPM;
+const RHYTHM_PATTERN_BEATS = 8;
+const FIRST_HIT_BEAT = 2;
+
+const rhythmPatterns = [
+  {
+    name: "FOUR KICK",
+    hits: [
+      { beat: 0, lane: 1, side: -1, accent: true },
+      { beat: 1, lane: 0, side: 1 },
+      { beat: 2, lane: 2, side: -1 },
+      { beat: 3, lane: 1, side: 1 },
+      { beat: 4, lane: 0, side: -1, accent: true },
+      { beat: 5, lane: 2, side: 1 },
+      { beat: 6, lane: 1, side: -1 },
+      { beat: 7, lane: 2, side: 1 },
+    ],
+  },
+  {
+    name: "SYNCOPATE",
+    hits: [
+      { beat: 0, lane: 1, side: -1, accent: true },
+      { beat: 0.75, lane: 2, side: 1 },
+      { beat: 1.5, lane: 0, side: -1 },
+      { beat: 2.75, lane: 1, side: 1, accent: true },
+      { beat: 4, lane: 2, side: -1 },
+      { beat: 5.25, lane: 0, side: 1 },
+      { beat: 6, lane: 1, side: -1 },
+      { beat: 7.25, lane: 2, side: 1 },
+    ],
+  },
+  {
+    name: "DOUBLE TAP",
+    hits: [
+      { beat: 0, lane: 0, side: -1, accent: true },
+      { beat: 0.5, lane: 1, side: 1 },
+      { beat: 2, lane: 2, side: -1, accent: true },
+      { beat: 2.5, lane: 1, side: 1 },
+      { beat: 4, lane: 1, side: -1 },
+      { beat: 5, lane: 0, side: 1 },
+      { beat: 6, lane: 2, side: -1 },
+      { beat: 6.5, lane: 1, side: 1 },
+    ],
+  },
+  {
+    name: "BREAK BEAT",
+    hits: [
+      { beat: 0, lane: 2, side: 1, accent: true },
+      { beat: 1.5, lane: 0, side: -1 },
+      { beat: 2.25, lane: 1, side: 1 },
+      { beat: 3.5, lane: 2, side: -1 },
+      { beat: 4, lane: 0, side: 1, accent: true },
+      { beat: 4.75, lane: 1, side: -1 },
+      { beat: 6.25, lane: 2, side: 1 },
+      { beat: 7, lane: 0, side: -1 },
+    ],
+  },
+];
 
 const aliens = [
   {
@@ -68,6 +127,11 @@ const state = {
   maxCombo: 0,
   beat: 0,
   nextSpawn: 0.3,
+  patternIndex: 0,
+  patternStartBeat: FIRST_HIT_BEAT,
+  rhythmStep: 0,
+  nextRhythmCue: null,
+  lastMusicPulse: -1,
   alienIndex: 0,
   alienHp: aliens[0].hp,
   alienDownUntil: 0,
@@ -768,19 +832,18 @@ class KickScene extends Phaser.Scene {
         continue;
       }
       const p = ballPosition(ball);
-      const age = state.beat - ball.born;
-      const closeness = 1 - Math.min(1, Math.abs(age - BALL_LIFE) / HIT_WINDOW);
+      const closeness = 1 - Math.min(1, Math.abs(state.beat - ball.hitTime) / HIT_WINDOW);
       ball.sprite.setPosition(p.x, p.y);
       ball.sprite.setScale((p.r / 24) * (1 + closeness * 0.25));
-      ball.sprite.rotation = ball.spin + age * 8 * ball.side;
+      ball.sprite.rotation = ball.spin + (state.beat - ball.born) * 8 * ball.side;
       ball.ring.clear();
       if (closeness > 0) {
-        ball.ring.lineStyle(5, 0xffd166, closeness * 0.45);
+        ball.ring.lineStyle(ball.accent ? 7 : 5, ball.accent ? 0xff4f79 : 0xffd166, closeness * 0.52);
         ball.ring.strokeCircle(p.x, p.y, p.r + 10);
       }
     }
     this.balls = this.balls.filter((ball) => {
-      const keep = state.beat - ball.born < BALL_LIFE + 0.75;
+      const keep = state.beat < ball.hitTime + 0.75;
       if (!keep) {
         ball.sprite.destroy();
         ball.ring.destroy();
@@ -937,7 +1000,7 @@ function resetGame() {
   state.combo = 0;
   state.maxCombo = 0;
   state.beat = 0;
-  state.nextSpawn = 0.2;
+  resetRhythmSequencer();
   state.alienIndex = 0;
   state.alienHp = aliens[0].hp;
   state.alienDownUntil = 0;
@@ -1004,12 +1067,78 @@ function blip(freq, duration = 0.05, gain = 0.07, type = "sine") {
   osc.stop(audio.currentTime + duration);
 }
 
-function spawnBall() {
-  const lane = Math.floor(Math.random() * 3);
-  const side = Math.random() > 0.5 ? 1 : -1;
+function resetRhythmSequencer() {
+  state.nextSpawn = 0;
+  state.patternIndex = 0;
+  state.patternStartBeat = FIRST_HIT_BEAT;
+  state.rhythmStep = 0;
+  state.lastMusicPulse = -1;
+  state.nextRhythmCue = null;
+  queueNextRhythmCue();
+}
+
+function queueNextRhythmCue() {
+  const pattern = rhythmPatterns[state.patternIndex];
+  const hit = pattern.hits[state.rhythmStep];
+  const hitBeat = state.patternStartBeat + hit.beat;
+  state.nextRhythmCue = {
+    ...hit,
+    patternName: pattern.name,
+    hitBeat,
+    hitTime: hitBeat * BEAT_SECONDS,
+    spawnTime: hitBeat * BEAT_SECONDS - BALL_LIFE,
+  };
+}
+
+function advanceRhythmCue() {
+  const previousPattern = state.patternIndex;
+  const pattern = rhythmPatterns[state.patternIndex];
+  state.rhythmStep += 1;
+  if (state.rhythmStep >= pattern.hits.length) {
+    state.rhythmStep = 0;
+    state.patternStartBeat += RHYTHM_PATTERN_BEATS;
+    state.patternIndex = (state.patternIndex + 1) % rhythmPatterns.length;
+    if (state.patternIndex !== previousPattern) announceRhythmShift();
+  }
+  queueNextRhythmCue();
+}
+
+function announceRhythmShift() {
+  const pattern = rhythmPatterns[state.patternIndex];
+  popFeedback(`RHYTHM ${pattern.name}`, "#ffd166");
+  blip(520, 0.055, 0.04, "triangle");
+  blip(780, 0.07, 0.035, "sine");
+}
+
+function updateMusicPulse() {
+  const pulse = Math.floor((state.beat / BEAT_SECONDS) * 2);
+  if (pulse <= state.lastMusicPulse) return;
+  state.lastMusicPulse = pulse;
+  const isBeat = pulse % 2 === 0;
+  const beatInBar = Math.floor(pulse / 2) % 4;
+  if (isBeat) {
+    blip(beatInBar === 0 ? 112 : 148, 0.045, beatInBar === 0 ? 0.038 : 0.025, "square");
+  } else {
+    blip(920, 0.022, 0.014, "triangle");
+  }
+}
+
+function updateRhythmFeed() {
+  while (state.nextRhythmCue && state.beat >= state.nextRhythmCue.spawnTime) {
+    spawnBall(state.nextRhythmCue);
+    advanceRhythmCue();
+  }
+}
+
+function spawnBall(cue) {
+  const lane = cue?.lane ?? Math.floor(Math.random() * 3);
+  const side = cue?.side ?? (Math.random() > 0.5 ? 1 : -1);
   const ball = {
     id: Math.random(),
-    born: state.beat,
+    born: cue?.spawnTime ?? state.beat,
+    hitTime: cue?.hitTime ?? state.beat + BALL_LIFE,
+    patternName: cue?.patternName ?? rhythmPatterns[state.patternIndex].name,
+    accent: Boolean(cue?.accent),
     lane,
     side,
     hit: false,
@@ -1017,7 +1146,7 @@ function spawnBall() {
     spin: Math.random() * Math.PI,
   };
   sceneRef?.createBall(ball);
-  blip(360 + lane * 70, 0.035, 0.028, "triangle");
+  blip(ball.accent ? 520 + lane * 80 : 360 + lane * 70, ball.accent ? 0.05 : 0.035, ball.accent ? 0.038 : 0.028, "triangle");
 }
 
 function kickAt(clientX) {
@@ -1029,7 +1158,7 @@ function kickAt(clientX) {
   state.aimX = Phaser.Math.Clamp(clientX / getWidth(), 0.08, 0.92);
   const active = sceneRef.balls
     .filter((ball) => !ball.hit && !ball.missed)
-    .map((ball) => ({ ball, diff: Math.abs((state.beat - ball.born) - BALL_LIFE) }))
+    .map((ball) => ({ ball, diff: Math.abs(state.beat - ball.hitTime) }))
     .sort((a, b) => a.diff - b.diff)[0];
 
   if (!active || active.diff > HIT_WINDOW) {
@@ -1233,20 +1362,13 @@ function updateGame(dt) {
     return;
   }
 
-  const alien = aliens[state.alienIndex];
   state.beat += dt;
   state.timeLeft -= dt;
-  state.nextSpawn -= dt;
-
-  if (state.nextSpawn <= 0) {
-    spawnBall();
-    const pressure = Math.max(0, (TARGET_SCORE - state.score) / TARGET_SCORE) * 0.06;
-    state.nextSpawn = Math.max(0.46, alien.tempo - Math.min(0.2, state.combo * 0.008) - pressure);
-  }
+  updateMusicPulse();
+  updateRhythmFeed();
 
   for (const ball of sceneRef.balls) {
-    const age = state.beat - ball.born;
-    if (!ball.hit && !ball.missed && age > BALL_LIFE + HIT_WINDOW) {
+    if (!ball.hit && !ball.missed && state.beat > ball.hitTime + HIT_WINDOW) {
       ball.missed = true;
       sceneRef?.kicker.setState("missReact", { force: true });
       sceneRef.kicker.lockedUntilMs = sceneRef.time.now + 320;
@@ -1269,13 +1391,13 @@ function getKickerCue() {
   const active = sceneRef.balls
     .filter((ball) => !ball.hit && !ball.missed)
     .map((ball) => {
-      const age = state.beat - ball.born;
-      return { ball, age, diff: Math.abs(age - BALL_LIFE) };
+      const timeToHit = ball.hitTime - state.beat;
+      return { ball, timeToHit, diff: Math.abs(timeToHit) };
     })
     .sort((a, b) => a.diff - b.diff)[0];
   if (!active) return "idle";
-  if (active.age > BALL_LIFE - 0.3 && active.diff <= HIT_WINDOW * 1.4) return "charge";
-  if (active.age > BALL_LIFE - 0.75) return "aim";
+  if (active.timeToHit <= 0.3 && active.diff <= HIT_WINDOW * 1.4) return "charge";
+  if (active.timeToHit <= 0.75) return "aim";
   return "idle";
 }
 
@@ -1288,7 +1410,8 @@ function strikeRing() {
 }
 
 function ballPosition(ball) {
-  const t = Phaser.Math.Clamp((state.beat - ball.born) / BALL_LIFE, 0, 1.25);
+  const startTime = ball.hitTime - BALL_LIFE;
+  const t = Phaser.Math.Clamp((state.beat - startTime) / BALL_LIFE, 0, 1.25);
   const ring = strikeRing();
   const laneOffset = (ball.lane - 1) * getWidth() * 0.18;
   const sx = getWidth() * (ball.side > 0 ? 0.82 : 0.18);
