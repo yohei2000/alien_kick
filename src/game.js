@@ -11,7 +11,6 @@ const pauseButton = document.querySelector("#pauseButton");
 const feedback = document.querySelector("#feedback");
 
 const ROUND_SECONDS = 90;
-const TARGET_SCORE = 100;
 const HIT_WINDOW = 0.18;
 const PERFECT_WINDOW = 0.055;
 const GOOD_WINDOW = 0.105;
@@ -136,6 +135,7 @@ const state = {
   alienHp: aliens[0].hp,
   alienDownUntil: 0,
   alienSwapTimer: 0,
+  finalWinTimer: 0,
   aimX: 0.5,
   hitStopTimer: 0,
   audioReady: false,
@@ -1005,6 +1005,7 @@ function resetGame() {
   state.alienHp = aliens[0].hp;
   state.alienDownUntil = 0;
   state.alienSwapTimer = 0;
+  state.finalWinTimer = 0;
   state.aimX = 0.5;
   state.hitStopTimer = 0;
   if (sceneRef) {
@@ -1219,7 +1220,6 @@ function resolveShot(ball, timing) {
     if (state.alienHp <= 0) knockDownAlien();
   }
 
-  if (state.score >= TARGET_SCORE) endGame(true);
   syncHud();
 }
 
@@ -1257,13 +1257,16 @@ function createShot(ball, timing, goal, aimLane) {
 }
 
 function knockDownAlien() {
+  if (state.alienDownUntil > state.beat || state.finalWinTimer > 0) return;
+  const finalAlien = state.alienIndex >= aliens.length - 1;
   state.alienDownUntil = state.beat + 4.6;
-  state.alienSwapTimer = 1.6;
+  state.alienSwapTimer = finalAlien ? 0 : 1.6;
+  state.finalWinTimer = finalAlien ? 1.65 : 0;
   state.score += 8;
   sceneRef?.alienVisual.loseReaction();
   sceneRef.flash.alpha = 0.38;
   sceneRef.cameras.main.shake(240, 0.018);
-  popFeedback("ALIEN DOWN!", "#ff4f79");
+  popFeedback(finalAlien ? "ALL CLEAR!" : "ALIEN DOWN!", "#ff4f79");
   blip(92, 0.15, 0.09, "square");
 }
 
@@ -1350,8 +1353,8 @@ function endGame(win) {
   if (state.mode !== "playing") return;
   state.mode = win ? "win" : "lose";
   const copy = win
-    ? `${state.score}点、最大${state.maxCombo}コンボ。地球代表の勝ちです。`
-    : `${state.score}点で終了。100点まであと${Math.max(0, TARGET_SCORE - state.score)}点でした。`;
+    ? `${aliens.length}体撃破、${state.score}点、最大${state.maxCombo}コンボ。地球代表の完全勝利です。`
+    : `${state.score}点で終了。残りのエイリアンを倒しきれませんでした。`;
   showMessage(win ? "YOU WIN" : "TIME UP", copy, "PLAY AGAIN");
 }
 
@@ -1364,6 +1367,14 @@ function updateGame(dt) {
 
   state.beat += dt;
   state.timeLeft -= dt;
+
+  if (state.finalWinTimer > 0) {
+    state.finalWinTimer -= dt;
+    if (state.finalWinTimer <= 0) endGame(true);
+    syncHud();
+    return;
+  }
+
   updateMusicPulse();
   updateRhythmFeed();
 
@@ -1382,7 +1393,7 @@ function updateGame(dt) {
     if (state.alienSwapTimer <= 0) nextAlien();
   }
 
-  if (state.timeLeft <= 0) endGame(state.score >= TARGET_SCORE);
+  if (state.timeLeft <= 0) endGame(false);
   syncHud();
 }
 
