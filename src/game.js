@@ -90,7 +90,7 @@ const aliens = [
     block: 0.24,
     tempo: 0.86,
     scale: 1.02,
-    spriteHeight: 232,
+    spriteHeight: 84,
   },
   {
     type: "Mantis",
@@ -105,7 +105,7 @@ const aliens = [
     block: 0.34,
     tempo: 0.78,
     scale: 1.08,
-    spriteHeight: 310,
+    spriteHeight: 126,
   },
   {
     type: "Psychic",
@@ -120,7 +120,7 @@ const aliens = [
     block: 0.43,
     tempo: 0.7,
     scale: 1.12,
-    spriteHeight: 296,
+    spriteHeight: 112,
   },
 ];
 
@@ -416,12 +416,14 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.alien = alien;
     this.shadow = scene.add.ellipse(0, 0, 120, 28, 0x000000, 0.28);
     this.sprite = scene.add.image(0, 0, alien.assetKey);
-    this.sprite.setOrigin(0.5, alien.type === "Mantis" ? 0.88 : alien.type === "Psychic" ? 0.78 : 0.7);
+    this.sprite.setOrigin(0.5, alien.type === "Mantis" ? 0.84 : alien.type === "Psychic" ? 0.72 : 0.62);
+    this.sprite.setAlpha(0.98);
     this.body = scene.add.graphics();
     this.fx = scene.add.graphics();
     this.container.remove(this.graphics);
     this.graphics.destroy();
     this.container.add([this.shadow, this.sprite, this.body, this.fx]);
+    this.container.setDepth(9);
     this.expression = "neutral";
     this.expressionUntil = 0;
     this.saveLane = 1;
@@ -432,7 +434,7 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.expression = "neutral";
     this.expressionUntil = 0;
     this.sprite.setTexture(alien.assetKey);
-    this.sprite.setOrigin(0.5, alien.type === "Mantis" ? 0.88 : alien.type === "Psychic" ? 0.78 : 0.7);
+    this.sprite.setOrigin(0.5, alien.type === "Mantis" ? 0.84 : alien.type === "Psychic" ? 0.72 : 0.62);
     this.introPose();
   }
 
@@ -499,40 +501,40 @@ class AlienKeeperAnimator extends CharacterAnimator {
 
     this.body.clear();
     this.fx.clear();
-    this.sprite.setDisplaySize((alien.spriteHeight * 1024) / 1024, alien.spriteHeight);
-    this.sprite.setTintFill(0xffffff);
+    const baseHeight = alien.spriteHeight;
+    const baseWidth = (this.sprite.width / this.sprite.height) * baseHeight;
+    this.sprite.setDisplaySize(baseWidth, baseHeight);
+    this.sprite.clearTint();
 
-    if (alien.type === "Slime") this.drawSlimeSprite(pose, down);
-    if (alien.type === "Mantis") this.drawMantisSprite(pose, down);
-    if (alien.type === "Psychic") this.drawPsychicSprite(pose, down);
+    if (alien.type === "Slime") this.drawSlimeSprite(pose, down, baseWidth, baseHeight);
+    if (alien.type === "Mantis") this.drawMantisSprite(pose, down, baseWidth, baseHeight);
+    if (alien.type === "Psychic") this.drawPsychicSprite(pose, down, baseWidth, baseHeight);
     this.drawExpressionMarks(pose, alien);
   }
 
-  drawSlimeSprite(pose, down) {
+  drawSlimeSprite(pose, down, baseWidth, baseHeight) {
     const save = this.stateName === "saveSuccess";
     const stretchX = save ? 1.1 : 1 + Math.sin(state.beat * 7) * 0.035;
     const squashY = save ? 0.92 : 1 + Math.cos(state.beat * 7) * 0.025;
-    this.sprite.setScale(stretchX, squashY);
+    this.sprite.setDisplaySize(baseWidth * stretchX, baseHeight * squashY);
     this.sprite.setPosition(0, 4);
     if (down) this.sprite.setTint(0xa8ffd0);
   }
 
-  drawMantisSprite(pose, down) {
+  drawMantisSprite(pose, down, baseWidth, baseHeight) {
     const save = this.stateName === "saveSuccess";
-    this.sprite.setScale(save ? 1.06 : 1, save ? 0.98 : 1);
+    this.sprite.setDisplaySize(baseWidth * (save ? 1.06 : 1), baseHeight * (save ? 0.98 : 1));
     this.sprite.setPosition((this.saveLane - 1) * (save ? 18 : 0), -8);
     this.sprite.setAngle(save ? (this.saveLane - 1) * 10 : Math.sin(state.beat * 9) * 0.8);
     if (down) this.sprite.setTint(0xe5ff9a);
   }
 
-  drawPsychicSprite(pose, down) {
+  drawPsychicSprite(pose, down, baseWidth, baseHeight) {
     const save = this.stateName === "saveSuccess";
-    this.sprite.setScale(1, 1 + Math.sin(state.beat * 4) * 0.015);
+    this.sprite.setDisplaySize(baseWidth, baseHeight * (1 + Math.sin(state.beat * 4) * 0.015));
     this.sprite.setPosition(0, -10 + Math.sin(state.beat * 4.4) * 8);
-    this.fx.lineStyle(3, this.alien.accent, save ? 0.36 : 0.22);
-    this.fx.strokeCircle(0, 18, pose.s * (save ? 1.35 : 1.1));
-    this.fx.lineStyle(2, 0xffffff, 0.22);
-    this.fx.strokeCircle(0, -62, pose.s * 0.48);
+    this.fx.lineStyle(3, this.alien.accent, save ? 0.28 : 0.16);
+    this.fx.strokeCircle(0, 18, pose.s * (save ? 1.18 : 0.96));
     if (down) this.sprite.setTint(0xe8d7ff);
   }
 
@@ -779,13 +781,21 @@ class KickScene extends Phaser.Scene {
     this.background = this.add.graphics();
     this.fieldLines = this.add.graphics();
     this.goalNet = this.add.graphics();
+    this.goalNet.setDepth(18);
     this.goalFx = this.add.graphics();
+    this.goalFx.setDepth(19);
     this.rhythm = this.add.graphics();
+    this.rhythm.setDepth(14);
     this.ballLayer = this.add.container(0, 0);
+    this.ballLayer.setDepth(16);
     this.shotLayer = this.add.container(0, 0);
+    this.shotLayer.setDepth(17);
     this.particleLayer = this.add.container(0, 0);
+    this.particleLayer.setDepth(15);
     this.aim = this.add.graphics();
+    this.aim.setDepth(13);
     this.flash = this.add.rectangle(0, 0, 10, 10, 0xfff6cf, 0).setOrigin(0);
+    this.flash.setDepth(30);
     this.kicker = new KickerAnimator(this);
     this.alienVisual = AlienVisualFactory.create(this, aliens[state.alienIndex]);
     this.makeStars();
