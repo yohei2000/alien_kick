@@ -1,4 +1,4 @@
-const CACHE_NAME = "alien-kick-buster-v10";
+const CACHE_NAME = "alien-kick-buster-v11";
 const ASSETS = [
   "./",
   "./index.html",
@@ -7,9 +7,13 @@ const ASSETS = [
   "./manifest.webmanifest",
   "./assets/icon.svg",
   "./assets/characters/kicker.png",
+  "./assets/characters/kicker-prekick.png",
+  "./assets/characters/kicker-kick.png",
   "./assets/characters/slime.png",
   "./assets/characters/mantis.png",
   "./assets/characters/psychic.png",
+  "./assets/characters/alien-block.png",
+  "./assets/characters/alien-hardhit.png",
 ];
 
 self.addEventListener("install", (event) => {

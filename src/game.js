@@ -243,8 +243,13 @@ class KickerAnimator extends CharacterAnimator {
     let angle = -2 + Math.sin(t * 4.2) * 1.4;
     let x = footX;
     let y = footY;
-    let spriteScaleX = (255 / this.sprite.height) * scale;
-    let spriteScaleY = spriteScaleX;
+    const textureKey = this.textureForState();
+    if (this.sprite.texture.key !== textureKey) this.sprite.setTexture(textureKey);
+    this.sprite.setOrigin(...this.originForState());
+    const baseHeight = this.heightForState() * scale;
+    const baseWidth = (this.sprite.width / this.sprite.height) * baseHeight;
+    let displayWidth = baseWidth;
+    let displayHeight = baseHeight;
 
     if (this.stateName === "aim") {
       angle = -10;
@@ -254,18 +259,18 @@ class KickerAnimator extends CharacterAnimator {
       angle = -16;
       x -= 18 * scale;
       y += 8 * scale;
-      spriteScaleX *= 1.04;
-      spriteScaleY *= 0.98;
+      displayWidth *= 1.04;
+      displayHeight *= 0.98;
     } else if (this.stateName === "kick") {
-      angle = 14;
-      x -= 8 * scale;
-      y += 6 * scale;
-      spriteScaleX *= 1.02;
-      spriteScaleY *= 0.98;
+      angle = 3;
+      x -= 26 * scale;
+      y += 14 * scale;
+      displayWidth *= 1.04;
+      displayHeight *= 0.98;
     } else if (this.stateName === "followThrough") {
-      angle = 24;
-      x -= 2 * scale;
-      y -= 4 * scale;
+      angle = 10;
+      x -= 22 * scale;
+      y += 8 * scale;
     } else if (this.stateName === "goalReact") {
       angle = -6;
       y -= Math.sin(Math.min(1, this.msAge() / 280) * Math.PI) * 26 * scale;
@@ -279,7 +284,7 @@ class KickerAnimator extends CharacterAnimator {
     this.shadow.setPosition(18 * scale, 10 * scale);
     this.shadow.setSize(132 * scale, 24 * scale);
     this.sprite.setPosition(0, 0);
-    this.sprite.setScale(spriteScaleX, spriteScaleY);
+    this.sprite.setDisplaySize(displayWidth, displayHeight);
     this.sprite.setAngle(angle);
     this.fx.clear();
 
@@ -297,6 +302,24 @@ class KickerAnimator extends CharacterAnimator {
       drawQuadraticTo(this.fx, 18 * scale, -44 * scale, 78 * scale, -88 * scale, 146 * scale, -66 * scale);
       this.fx.strokePath();
     }
+  }
+
+  textureForState() {
+    if (this.stateName === "aim" || this.stateName === "charge") return "kicker-prekick";
+    if (this.stateName === "kick" || this.stateName === "followThrough") return "kicker-kick";
+    return "kicker";
+  }
+
+  originForState() {
+    if (this.stateName === "aim" || this.stateName === "charge") return [0.5, 0.96];
+    if (this.stateName === "kick" || this.stateName === "followThrough") return [0.42, 0.9];
+    return [0.29, 0.985];
+  }
+
+  heightForState() {
+    if (this.stateName === "aim" || this.stateName === "charge") return 250;
+    if (this.stateName === "kick" || this.stateName === "followThrough") return 238;
+    return 255;
   }
 
   poseForState(ring, footY, pulse, scale) {
@@ -418,15 +441,20 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.sprite = scene.add.image(0, 0, alien.assetKey);
     this.sprite.setOrigin(0.5, alien.type === "Mantis" ? 0.84 : alien.type === "Psychic" ? 0.72 : 0.62);
     this.sprite.setAlpha(0.98);
+    this.actionSprite = scene.add.image(0, 0, "alien-block");
+    this.actionSprite.setOrigin(0.5, 0.56);
+    this.actionSprite.setVisible(false);
     this.body = scene.add.graphics();
     this.fx = scene.add.graphics();
     this.container.remove(this.graphics);
     this.graphics.destroy();
-    this.container.add([this.shadow, this.sprite, this.body, this.fx]);
+    this.container.add([this.shadow, this.sprite, this.actionSprite, this.body, this.fx]);
     this.container.setDepth(9);
     this.expression = "neutral";
     this.expressionUntil = 0;
     this.saveLane = 1;
+    this.actionUntilMs = 0;
+    this.actionKind = "block";
   }
 
   setAlien(alien) {
@@ -472,6 +500,7 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.expression = goal ? "fail" : "save";
     this.expressionUntil = state.beat + (goal ? 0.7 : 0.52);
     this.setState(goal ? "saveFail" : "saveSuccess", { force: true, timing });
+    if (!goal) this.showAction("block", 320);
     this.scene.tweens.add({
       targets: this.container,
       x: this.container.x + (aimLane - 1) * (goal ? 7 : 18),
@@ -505,11 +534,44 @@ class AlienKeeperAnimator extends CharacterAnimator {
     const baseWidth = (this.sprite.width / this.sprite.height) * baseHeight;
     this.sprite.setDisplaySize(baseWidth, baseHeight);
     this.sprite.clearTint();
+    const actionActive = this.scene.time.now < this.actionUntilMs;
+    this.sprite.setAlpha(actionActive ? 0 : 0.98);
+    this.body.setAlpha(actionActive ? 0 : 1);
+    this.actionSprite.setVisible(actionActive);
 
     if (alien.type === "Slime") this.drawSlimeSprite(pose, down, baseWidth, baseHeight);
     if (alien.type === "Mantis") this.drawMantisSprite(pose, down, baseWidth, baseHeight);
     if (alien.type === "Psychic") this.drawPsychicSprite(pose, down, baseWidth, baseHeight);
+    if (actionActive) {
+      this.drawActionSprite(pose, alien);
+      return;
+    }
     this.drawExpressionMarks(pose, alien);
+  }
+
+  showAction(kind, durationMs = 280) {
+    this.actionKind = kind;
+    this.actionUntilMs = Math.max(this.actionUntilMs, this.scene.time.now + durationMs);
+    this.actionSprite.setTexture(kind === "hardhit" ? "alien-hardhit" : "alien-block");
+    this.actionSprite.setAlpha(kind === "hardhit" ? 1 : 0.96);
+    this.actionSprite.setScale(0.82);
+    this.scene.tweens.add({
+      targets: this.actionSprite,
+      scaleX: kind === "hardhit" ? 0.98 : 0.9,
+      scaleY: kind === "hardhit" ? 0.98 : 0.9,
+      duration: 110,
+      ease: "Back.Out",
+    });
+  }
+
+  drawActionSprite(pose, alien) {
+    const hardhit = this.actionKind === "hardhit";
+    const height = Math.min(getWidth() * (hardhit ? 0.43 : 0.38), hardhit ? 164 : 146);
+    this.actionSprite.setDisplaySize(height, height);
+    this.actionSprite.setPosition((this.saveLane - 1) * (hardhit ? 7 : 16), hardhit ? -8 : -3);
+    this.actionSprite.setAngle((this.saveLane - 1) * (hardhit ? -8 : 7) + Math.sin(state.beat * 14) * 1.6);
+    this.fx.lineStyle(hardhit ? 5 : 3, hardhit ? 0xffd166 : alien.accent, hardhit ? 0.55 : 0.28);
+    this.fx.strokeCircle(0, 0, pose.s * (hardhit ? 1.48 : 1.18));
   }
 
   drawSlimeSprite(pose, down, baseWidth, baseHeight) {
@@ -696,6 +758,7 @@ class AlienKeeperAnimator extends CharacterAnimator {
   }
 
   emitContactEffect(x, y, goal, timing) {
+    if (!goal && timing === "hard") this.showAction("hardhit", 360);
     if (this.alien.type === "Slime") this.emitSlimeSplash(x, y, goal, timing);
     if (this.alien.type === "Mantis") this.emitMantisSlash(x, y, goal, timing);
     if (this.alien.type === "Psychic") this.emitPsychicPulse(x, y, goal, timing);
@@ -771,9 +834,13 @@ class KickScene extends Phaser.Scene {
 
   preload() {
     this.load.image("kicker", "assets/characters/kicker.png");
+    this.load.image("kicker-prekick", "assets/characters/kicker-prekick.png");
+    this.load.image("kicker-kick", "assets/characters/kicker-kick.png");
     this.load.image("alien-slime", "assets/characters/slime.png");
     this.load.image("alien-mantis", "assets/characters/mantis.png");
     this.load.image("alien-psychic", "assets/characters/psychic.png");
+    this.load.image("alien-block", "assets/characters/alien-block.png");
+    this.load.image("alien-hardhit", "assets/characters/alien-hardhit.png");
   }
 
   create() {
