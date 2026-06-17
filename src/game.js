@@ -79,6 +79,7 @@ const rhythmPatterns = [
 const aliens = [
   {
     type: "Slime",
+    assetKey: "alien-slime",
     name: "スライムGK ネブラ",
     tag: "粘液ボディ: 低速だが伸びる",
     hp: 86,
@@ -89,9 +90,11 @@ const aliens = [
     block: 0.24,
     tempo: 0.86,
     scale: 1.02,
+    spriteHeight: 232,
   },
   {
     type: "Mantis",
+    assetKey: "alien-mantis",
     name: "マンティスGK ザグ",
     tag: "鎌腕セーブ: 横に強い",
     hp: 118,
@@ -102,9 +105,11 @@ const aliens = [
     block: 0.34,
     tempo: 0.78,
     scale: 1.08,
+    spriteHeight: 310,
   },
   {
     type: "Psychic",
+    assetKey: "alien-psychic",
     name: "サイキックGK ルクス",
     tag: "念動バリア: 硬いが崩れる",
     hp: 150,
@@ -115,6 +120,7 @@ const aliens = [
     block: 0.43,
     tempo: 0.7,
     scale: 1.12,
+    spriteHeight: 296,
   },
 ];
 
@@ -180,6 +186,13 @@ class CharacterAnimator {
 class KickerAnimator extends CharacterAnimator {
   constructor(scene) {
     super(scene);
+    this.container.remove(this.graphics);
+    this.graphics.destroy();
+    this.shadow = scene.add.ellipse(0, 0, 124, 26, 0x000000, 0.24);
+    this.sprite = scene.add.image(0, 0, "kicker");
+    this.sprite.setOrigin(0.29, 0.985);
+    this.fx = scene.add.graphics();
+    this.container.add([this.shadow, this.sprite, this.fx]);
     this.lockedUntilMs = 0;
     this.lastPose = "idle";
     this.plantFoot = null;
@@ -222,67 +235,67 @@ class KickerAnimator extends CharacterAnimator {
 
   draw() {
     const ring = strikeRing();
-    const g = this.graphics;
     const t = state.beat;
     const pulse = Math.sin(t * 7) * 0.5 + 0.5;
-    const footY = ring.y + 56;
     const scale = Math.min(1.12, Math.max(0.88, getWidth() / 390));
-    const pose = this.poseForState(ring, footY, pulse, scale);
+    const footX = ring.x - 34 * scale;
+    const footY = ring.y + 58 * scale;
+    let angle = -2 + Math.sin(t * 4.2) * 1.4;
+    let x = footX;
+    let y = footY;
+    let spriteScaleX = (255 / this.sprite.height) * scale;
+    let spriteScaleY = spriteScaleX;
 
-    this.container.setPosition(0, 0);
-    g.clear();
-    g.lineCap = 1;
-
-    g.fillStyle(0x02070c, 0.28);
-    g.fillEllipse(pose.plant.x + 18, footY + 14, 118 * scale, 24 * scale);
-
-    if (this.stateName === "charge") {
-      g.lineStyle(3, 0xffd166, 0.25 + pulse * 0.35);
-      g.strokeCircle(pose.plant.x, pose.plant.y, 26 * scale + pulse * 7);
-      g.fillStyle(0xffd166, 0.14 + pulse * 0.14);
-      g.fillCircle(pose.plant.x, pose.plant.y, 19 * scale + pulse * 4);
+    if (this.stateName === "aim") {
+      angle = -10;
+      x -= 12 * scale;
+      y += 3 * scale;
+    } else if (this.stateName === "charge") {
+      angle = -16;
+      x -= 18 * scale;
+      y += 8 * scale;
+      spriteScaleX *= 1.04;
+      spriteScaleY *= 0.98;
+    } else if (this.stateName === "kick") {
+      angle = 14;
+      x -= 8 * scale;
+      y += 6 * scale;
+      spriteScaleX *= 1.02;
+      spriteScaleY *= 0.98;
+    } else if (this.stateName === "followThrough") {
+      angle = 24;
+      x -= 2 * scale;
+      y -= 4 * scale;
+    } else if (this.stateName === "goalReact") {
+      angle = -6;
+      y -= Math.sin(Math.min(1, this.msAge() / 280) * Math.PI) * 26 * scale;
+    } else if (this.stateName === "missReact") {
+      angle = 7;
+      x += 8 * scale;
+      y += 10 * scale;
     }
 
-    drawLimb(g, pose.hip, pose.plantKnee, pose.plant, 11 * scale, 0xeef8ff);
-    drawLimb(g, pose.hip, pose.kickKnee, pose.kickFoot, 12 * scale, 0x41e7ff);
+    this.container.setPosition(x, y);
+    this.shadow.setPosition(18 * scale, 10 * scale);
+    this.shadow.setSize(132 * scale, 24 * scale);
+    this.sprite.setPosition(0, 0);
+    this.sprite.setScale(spriteScaleX, spriteScaleY);
+    this.sprite.setAngle(angle);
+    this.fx.clear();
 
-    g.fillStyle(0xff4f79, 1);
-    g.fillRoundedRect(pose.kickFoot.x - 5 * scale, pose.kickFoot.y - 5 * scale, 47 * scale, 16 * scale, 8 * scale);
-    g.fillStyle(0xeef8ff, 0.95);
-    g.fillRoundedRect(pose.plant.x - 23 * scale, pose.plant.y - 5 * scale, 42 * scale, 14 * scale, 7 * scale);
+    if (this.stateName === "charge") {
+      this.fx.lineStyle(3, 0xffd166, 0.25 + pulse * 0.35);
+      this.fx.strokeCircle(0, 0, 26 * scale + pulse * 8);
+      this.fx.lineStyle(1.5, 0xffffff, 0.22 + pulse * 0.16);
+      this.fx.strokeCircle(0, 0, 40 * scale + pulse * 12);
+    }
 
-    drawLimb(g, pose.shoulder, pose.armA, pose.handA, 8 * scale, 0xeef8ff);
-    drawLimb(g, pose.shoulder, pose.armB, pose.handB, 8 * scale, 0xffd166);
-
-    g.lineStyle(18 * scale, 0x182a45, 1);
-    g.beginPath();
-    g.moveTo(pose.hip.x, pose.hip.y);
-    g.lineTo(pose.chest.x, pose.chest.y);
-    g.strokePath();
-
-    g.lineStyle(10 * scale, 0x41e7ff, 1);
-    g.beginPath();
-    g.moveTo(pose.hip.x - 7 * scale, pose.hip.y - 3 * scale);
-    g.lineTo(pose.chest.x + pose.twist * 18 * scale, pose.chest.y - 4 * scale);
-    g.strokePath();
-
-    g.fillStyle(0xffd8ba, 1);
-    g.fillCircle(pose.head.x, pose.head.y, 16 * scale);
-    g.fillStyle(0x07131f, 1);
-    g.fillCircle(pose.head.x + 4 * scale, pose.head.y - 2 * scale, 2.8 * scale);
-    g.lineStyle(2 * scale, 0x07131f, 0.7);
-    g.lineBetween(pose.head.x - 8 * scale, pose.head.y + 7 * scale, pose.head.x + 10 * scale, pose.head.y + pose.mouth * scale);
-
-    if (this.stateName === "kick") {
-      g.lineStyle(5 * scale, 0xfff6cf, 0.82);
-      g.beginPath();
-      g.moveTo(pose.kickFoot.x + 30 * scale, pose.kickFoot.y);
-      g.lineTo(pose.kickFoot.x + 86 * scale, pose.kickFoot.y - 18 * scale);
-      g.strokePath();
-      for (let i = 0; i < 4; i += 1) {
-        g.lineStyle(2, 0xffd166, 0.55 - i * 0.1);
-        g.strokeCircle(pose.kickFoot.x + 44 * scale, pose.kickFoot.y - 9 * scale, 18 * scale + i * 9 * scale);
-      }
+    if (this.stateName === "kick" || this.stateName === "followThrough") {
+      this.fx.lineStyle(6 * scale, 0xfff6cf, 0.72);
+      this.fx.beginPath();
+      this.fx.moveTo(18 * scale, -44 * scale);
+      drawQuadraticTo(this.fx, 18 * scale, -44 * scale, 78 * scale, -88 * scale, 146 * scale, -66 * scale);
+      this.fx.strokePath();
     }
   }
 
@@ -402,11 +415,13 @@ class AlienKeeperAnimator extends CharacterAnimator {
     super(scene);
     this.alien = alien;
     this.shadow = scene.add.ellipse(0, 0, 120, 28, 0x000000, 0.28);
+    this.sprite = scene.add.image(0, 0, alien.assetKey);
+    this.sprite.setOrigin(0.5, alien.type === "Mantis" ? 0.88 : alien.type === "Psychic" ? 0.78 : 0.7);
     this.body = scene.add.graphics();
     this.fx = scene.add.graphics();
     this.container.remove(this.graphics);
     this.graphics.destroy();
-    this.container.add([this.shadow, this.body, this.fx]);
+    this.container.add([this.shadow, this.sprite, this.body, this.fx]);
     this.expression = "neutral";
     this.expressionUntil = 0;
     this.saveLane = 1;
@@ -416,6 +431,8 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.alien = alien;
     this.expression = "neutral";
     this.expressionUntil = 0;
+    this.sprite.setTexture(alien.assetKey);
+    this.sprite.setOrigin(0.5, alien.type === "Mantis" ? 0.88 : alien.type === "Psychic" ? 0.78 : 0.7);
     this.introPose();
   }
 
@@ -482,9 +499,59 @@ class AlienKeeperAnimator extends CharacterAnimator {
 
     this.body.clear();
     this.fx.clear();
-    if (alien.type === "Slime") this.drawSlime(pose);
-    if (alien.type === "Mantis") this.drawMantis(pose);
-    if (alien.type === "Psychic") this.drawPsychic(pose);
+    this.sprite.setDisplaySize((alien.spriteHeight * 1024) / 1024, alien.spriteHeight);
+    this.sprite.setTintFill(0xffffff);
+
+    if (alien.type === "Slime") this.drawSlimeSprite(pose, down);
+    if (alien.type === "Mantis") this.drawMantisSprite(pose, down);
+    if (alien.type === "Psychic") this.drawPsychicSprite(pose, down);
+    this.drawExpressionMarks(pose, alien);
+  }
+
+  drawSlimeSprite(pose, down) {
+    const save = this.stateName === "saveSuccess";
+    const stretchX = save ? 1.1 : 1 + Math.sin(state.beat * 7) * 0.035;
+    const squashY = save ? 0.92 : 1 + Math.cos(state.beat * 7) * 0.025;
+    this.sprite.setScale(stretchX, squashY);
+    this.sprite.setPosition(0, 4);
+    if (down) this.sprite.setTint(0xa8ffd0);
+  }
+
+  drawMantisSprite(pose, down) {
+    const save = this.stateName === "saveSuccess";
+    this.sprite.setScale(save ? 1.06 : 1, save ? 0.98 : 1);
+    this.sprite.setPosition((this.saveLane - 1) * (save ? 18 : 0), -8);
+    this.sprite.setAngle(save ? (this.saveLane - 1) * 10 : Math.sin(state.beat * 9) * 0.8);
+    if (down) this.sprite.setTint(0xe5ff9a);
+  }
+
+  drawPsychicSprite(pose, down) {
+    const save = this.stateName === "saveSuccess";
+    this.sprite.setScale(1, 1 + Math.sin(state.beat * 4) * 0.015);
+    this.sprite.setPosition(0, -10 + Math.sin(state.beat * 4.4) * 8);
+    this.fx.lineStyle(3, this.alien.accent, save ? 0.36 : 0.22);
+    this.fx.strokeCircle(0, 18, pose.s * (save ? 1.35 : 1.1));
+    this.fx.lineStyle(2, 0xffffff, 0.22);
+    this.fx.strokeCircle(0, -62, pose.s * 0.48);
+    if (down) this.sprite.setTint(0xe8d7ff);
+  }
+
+  drawExpressionMarks(pose, alien) {
+    const y = alien.type === "Slime" ? -40 : alien.type === "Psychic" ? -66 : -78;
+    if (this.expression === "save") {
+      this.body.lineStyle(4, alien.accent, 0.92);
+      this.body.lineBetween(-28, y, -10, y - 10);
+      this.body.lineBetween(10, y - 10, 28, y);
+      return;
+    }
+    if (this.expression === "fail" || this.expression === "sad") {
+      this.body.lineStyle(4, 0xff4f79, 0.92);
+      this.body.lineBetween(-16, y - 6, 16, y + 12);
+      this.body.strokeCircle(0, y + 24, 12);
+      return;
+    }
+    this.body.lineStyle(3, 0xffffff, 0.34);
+    this.body.strokeCircle(0, y + 8, 8);
   }
 
   idleSpeed() {
@@ -698,6 +765,13 @@ class KickScene extends Phaser.Scene {
     this.particles = [];
     this.goalBursts = [];
     this.stars = [];
+  }
+
+  preload() {
+    this.load.image("kicker", "assets/characters/kicker.png");
+    this.load.image("alien-slime", "assets/characters/slime.png");
+    this.load.image("alien-mantis", "assets/characters/mantis.png");
+    this.load.image("alien-psychic", "assets/characters/psychic.png");
   }
 
   create() {
