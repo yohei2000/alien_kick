@@ -15,10 +15,13 @@ const MUSIC_BPM = 126;
 const BEAT_SECONDS = 60 / MUSIC_BPM;
 const BALL_LIFE_BEATS = 2.5;
 const BALL_LIFE = BEAT_SECONDS * BALL_LIFE_BEATS;
-const HIT_WINDOW = 0.18;
-const PERFECT_WINDOW = 0.055;
-const GOOD_WINDOW = 0.105;
+const HIT_WINDOW = 0.2;
+const PERFECT_WINDOW = 0.07;
+const GOOD_WINDOW = 0.125;
 const HIT_STOP_SECONDS = 0.08;
+const INPUT_JUDGEMENT_OFFSET_SECONDS = 0.018;
+const MIN_AUDIO_LATENCY_COMPENSATION = 0.018;
+const MAX_AUDIO_LATENCY_COMPENSATION = 0.085;
 const MUSIC_STEP_SECONDS = BEAT_SECONDS / 4;
 const MUSIC_LOOKAHEAD_SECONDS = 0.18;
 const RHYTHM_PATTERN_BEATS = 8;
@@ -220,6 +223,7 @@ const state = {
   hitStopTimer: 0,
   audioReady: false,
   audio: null,
+  audioLatency: MIN_AUDIO_LATENCY_COMPENSATION,
   masterGain: null,
   musicGain: null,
   drumGain: null,
@@ -1048,11 +1052,27 @@ class KickScene extends Phaser.Scene {
   drawRhythmLane() {
     const ring = strikeRing();
     const g = this.rhythm;
+    const active = this.balls
+      .filter((ball) => !ball.hit && !ball.missed)
+      .map((ball) => ({ ball, timeToHit: ball.hitTime - state.beat, diff: Math.abs(ball.hitTime - state.beat) }))
+      .sort((a, b) => a.diff - b.diff)[0];
+    const approach = active ? 1 - Math.min(1, Math.max(0, active.timeToHit) / (BEAT_SECONDS * 1.5)) : 0;
+    const hitGlow = active ? 1 - Math.min(1, active.diff / HIT_WINDOW) : 0;
+    const color = active?.ball.accent ? 0xff4f79 : hitGlow > 0.72 ? 0xffffff : 0xffd166;
     g.clear();
-    g.lineStyle(14, 0xffd166, 0.2);
+    g.lineStyle(14 + approach * 8, color, 0.16 + approach * 0.14);
     g.strokeCircle(ring.x, ring.y, ring.r);
-    g.lineStyle(4, 0xffd166, 0.9 + Math.sin(state.beat * 12) * 0.1);
+    g.lineStyle(4 + hitGlow * 5, color, 0.78 + hitGlow * 0.22);
     g.strokeCircle(ring.x, ring.y, ring.r);
+    if (active && active.timeToHit > 0) {
+      const radius = ring.r + 76 * Math.max(0, 1 - approach);
+      g.lineStyle(3, color, 0.42 + approach * 0.28);
+      g.strokeCircle(ring.x, ring.y, radius);
+    }
+    if (hitGlow > 0.72) {
+      g.fillStyle(0xffffff, (hitGlow - 0.72) * 0.55);
+      g.fillCircle(ring.x, ring.y, ring.r * 0.82);
+    }
     g.fillStyle(0xffffff, 0.18);
     g.fillRect(ring.x - 2, ring.y - ring.r - 18, 4, ring.r * 2 + 36);
   }
@@ -1304,6 +1324,11 @@ function setupAudio() {
   if (!AudioContext) return;
   state.audio = new AudioContext();
   const audio = state.audio;
+  state.audioLatency = Phaser.Math.Clamp(
+    Math.max(audio.baseLatency || 0, audio.outputLatency || 0, MIN_AUDIO_LATENCY_COMPENSATION),
+    MIN_AUDIO_LATENCY_COMPENSATION,
+    MAX_AUDIO_LATENCY_COMPENSATION,
+  );
   const compressor = audio.createDynamicsCompressor();
   compressor.threshold.value = -18;
   compressor.knee.value = 18;
@@ -1387,7 +1412,7 @@ function resumeMusicClock() {
   if (!state.audio) return;
   state.audio.resume();
   state.musicStartAt = state.audio.currentTime - state.musicPauseAt;
-  state.lastSongTime = state.musicPauseAt;
+  state.lastSongTime = Math.max(0, state.musicPauseAt - getAudioLatencyCompensation());
   state.musicNextStep = Math.max(state.musicNextStep, Math.floor(state.musicPauseAt / MUSIC_STEP_SECONDS));
 }
 
@@ -1395,6 +1420,22 @@ function getSongTime() {
   const audio = state.audio;
   if (!audio || !state.audioReady) return state.beat;
   return Math.max(0, audio.currentTime - state.musicStartAt);
+}
+
+function getAudioLatencyCompensation() {
+  return Phaser.Math.Clamp(
+    state.audioLatency || state.audio?.baseLatency || MIN_AUDIO_LATENCY_COMPENSATION,
+    MIN_AUDIO_LATENCY_COMPENSATION,
+    MAX_AUDIO_LATENCY_COMPENSATION,
+  );
+}
+
+function getVisualSongTime() {
+  return Math.max(0, getSongTime() - getAudioLatencyCompensation());
+}
+
+function getInputSongTime() {
+  return getVisualSongTime() + INPUT_JUDGEMENT_OFFSET_SECONDS;
 }
 
 function blip(freq, duration = 0.05, gain = 0.07, type = "sine") {
@@ -2270,9 +2311,13 @@ function kickAt(clientX) {
   }
 
   state.aimX = Phaser.Math.Clamp(clientX / getWidth(), 0.08, 0.92);
+  const inputSongTime = getInputSongTime();
   const active = sceneRef.balls
     .filter((ball) => !ball.hit && !ball.missed)
-    .map((ball) => ({ ball, diff: Math.abs(state.beat - ball.hitTime) }))
+    .map((ball) => {
+      const signedDiff = inputSongTime - ball.hitTime;
+      return { ball, signedDiff, diff: Math.abs(signedDiff), hitPoint: ballPositionAt(ball, inputSongTime) };
+    })
     .sort((a, b) => a.diff - b.diff)[0];
 
   if (!active || active.diff > HIT_WINDOW) {
@@ -2285,10 +2330,14 @@ function kickAt(clientX) {
   }
 
   active.ball.hit = true;
+  active.ball.judgedAt = inputSongTime;
+  active.ball.hitPoint = active.hitPoint;
+  active.ball.signedDiff = active.signedDiff;
   const timing = active.diff <= PERFECT_WINDOW ? "hard" : active.diff <= GOOD_WINDOW ? "good" : "ok";
   state.hitStopTimer = HIT_STOP_SECONDS;
-  sceneRef?.kicker.kick(timing, ballPosition(active.ball));
+  sceneRef?.kicker.kick(timing, active.hitPoint);
   playKickImpactSfx(timing);
+  emitKickBurst(active.hitPoint, timing);
   resolveShot(active.ball, timing);
 }
 
@@ -2339,7 +2388,7 @@ function resolveShot(ball, timing) {
 }
 
 function createShot(ball, timing, goal, aimLane) {
-  const start = ballPosition(ball);
+  const start = ball.hitPoint || ballPosition(ball);
   const goalBox = getGoalBox();
   const alien = getAlienPose();
   const laneX = goalBox.x + goalBox.w * (0.22 + aimLane * 0.28);
@@ -2409,8 +2458,38 @@ function updateComboMusicTier() {
   playComboTierSfx(tier);
 }
 
+function emitKickBurst(point, timing) {
+  if (!sceneRef || !point) return;
+  const hard = timing === "hard";
+  const ring = sceneRef.add.circle(point.x, point.y, hard ? 22 : 16, 0xffffff, 0);
+  ring.setStrokeStyle(hard ? 7 : 4, hard ? 0xfff6cf : 0x41e7ff, hard ? 0.9 : 0.68);
+  sceneRef.particleLayer.add(ring);
+  sceneRef.tweens.add({
+    targets: ring,
+    alpha: 0,
+    scale: hard ? 2.9 : 2.1,
+    duration: hard ? 240 : 180,
+    ease: "Quad.Out",
+    onComplete: () => ring.destroy(),
+  });
+  const count = hard ? 18 : 10;
+  for (let i = 0; i < count; i += 1) {
+    const angle = -Math.PI * 0.5 + (Math.random() - 0.5) * 1.7;
+    const speed = (hard ? 180 : 110) + Math.random() * (hard ? 260 : 150);
+    sceneRef.createParticle({
+      x: point.x,
+      y: point.y,
+      vx: Math.cos(angle) * speed,
+      vy: Math.sin(angle) * speed,
+      life: 0.22 + Math.random() * 0.24,
+      color: hard ? (i % 2 ? 0xffd166 : 0xffffff) : 0x41e7ff,
+      r: 2 + Math.random() * (hard ? 4 : 3),
+    });
+  }
+}
+
 function emitShotParticles(ball, timing, goal) {
-  const p = ballPosition(ball);
+  const p = ball.hitPoint || ballPosition(ball);
   const count = timing === "hard" ? 22 : 12;
   for (let i = 0; i < count; i += 1) {
     const angle = -Math.PI / 2 + (Math.random() - 0.5) * 1.7;
@@ -2488,9 +2567,9 @@ function endGame(win) {
 
 function updateGame(dt) {
   const audioClockRunning = state.audioReady && state.audio?.state === "running";
-  let songNow = audioClockRunning ? getSongTime() : state.beat + dt;
+  let songNow = audioClockRunning ? getVisualSongTime() : state.beat + dt;
   if (audioClockRunning && songNow + 0.05 < state.lastSongTime) {
-    state.musicStartAt = state.audio.currentTime - state.beat;
+    state.musicStartAt = state.audio.currentTime - state.beat - getAudioLatencyCompensation();
     songNow = state.beat + dt;
   }
   const elapsed = Math.max(0, songNow - state.lastSongTime);
@@ -2553,8 +2632,12 @@ function strikeRing() {
 }
 
 function ballPosition(ball) {
+  return ballPositionAt(ball, state.beat);
+}
+
+function ballPositionAt(ball, songTime) {
   const startTime = ball.hitTime - BALL_LIFE;
-  const t = Phaser.Math.Clamp((state.beat - startTime) / BALL_LIFE, 0, 1.25);
+  const t = Phaser.Math.Clamp((songTime - startTime) / BALL_LIFE, 0, 1.25);
   const ring = strikeRing();
   const laneOffset = (ball.lane - 1) * getWidth() * 0.18;
   const sx = getWidth() * (ball.side > 0 ? 0.82 : 0.18);
