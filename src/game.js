@@ -27,6 +27,50 @@ const MAIN_GAIN = 0.82;
 const MUSIC_GAIN = 0.5;
 const SFX_GAIN = 0.72;
 
+const NOTE = {
+  F2: 87.31,
+  G2: 98,
+  A2: 110,
+  B2: 123.47,
+  C3: 130.81,
+  D3: 146.83,
+  E3: 164.81,
+  F3: 174.61,
+  G3: 196,
+  GS3: 207.65,
+  A3: 220,
+  B3: 246.94,
+  C4: 261.63,
+  D4: 293.66,
+  E4: 329.63,
+  F4: 349.23,
+  G4: 392,
+  GS4: 415.3,
+  A4: 440,
+  B4: 493.88,
+  C5: 523.25,
+  D5: 587.33,
+  E5: 659.25,
+  F5: 698.46,
+  G5: 783.99,
+  A5: 880,
+  B5: 987.77,
+};
+
+const songChords = [
+  { bass: NOTE.A2, pad: [NOTE.A3, NOTE.C4, NOTE.E4, NOTE.A4], arp: [NOTE.A4, NOTE.C5, NOTE.E5, NOTE.G5] },
+  { bass: NOTE.F2, pad: [NOTE.F3, NOTE.A3, NOTE.C4, NOTE.E4], arp: [NOTE.A4, NOTE.C5, NOTE.E5, NOTE.A5] },
+  { bass: NOTE.G2, pad: [NOTE.G3, NOTE.B3, NOTE.D4, NOTE.G4], arp: [NOTE.G4, NOTE.B4, NOTE.D5, NOTE.G5] },
+  { bass: NOTE.E3, pad: [NOTE.E3, NOTE.GS3, NOTE.B3, NOTE.E4], arp: [NOTE.GS4, NOTE.B4, NOTE.E5, NOTE.G5] },
+];
+
+const leadMotifs = [
+  [NOTE.E5, NOTE.G5, NOTE.A5, NOTE.G5, NOTE.E5, NOTE.D5, NOTE.C5, NOTE.E5],
+  [NOTE.A4, NOTE.C5, NOTE.E5, NOTE.G5, NOTE.A5, NOTE.G5, NOTE.E5, NOTE.C5],
+  [NOTE.G4, NOTE.B4, NOTE.D5, NOTE.E5, NOTE.G5, NOTE.E5, NOTE.D5, NOTE.B4],
+  [NOTE.E5, NOTE.GS4, NOTE.B4, NOTE.E5, NOTE.F5, NOTE.E5, NOTE.B4, NOTE.GS4],
+];
+
 const rhythmPatterns = [
   {
     name: "FOUR KICK",
@@ -158,6 +202,9 @@ const state = {
   masterGain: null,
   musicGain: null,
   sfxGain: null,
+  fxDelay: null,
+  fxFeedback: null,
+  fxFilter: null,
   noiseBuffer: null,
 };
 
@@ -1229,11 +1276,22 @@ function setupAudio() {
   state.masterGain = audio.createGain();
   state.musicGain = audio.createGain();
   state.sfxGain = audio.createGain();
+  state.fxDelay = audio.createDelay(1.2);
+  state.fxFeedback = audio.createGain();
+  state.fxFilter = audio.createBiquadFilter();
   state.masterGain.gain.value = MAIN_GAIN;
   state.musicGain.gain.value = MUSIC_GAIN;
   state.sfxGain.gain.value = SFX_GAIN;
+  state.fxDelay.delayTime.value = BEAT_SECONDS * 0.75;
+  state.fxFeedback.gain.value = 0.24;
+  state.fxFilter.type = "highpass";
+  state.fxFilter.frequency.value = 620;
   state.musicGain.connect(compressor);
   state.sfxGain.connect(compressor);
+  state.fxDelay.connect(state.fxFeedback);
+  state.fxFeedback.connect(state.fxDelay);
+  state.fxDelay.connect(state.fxFilter);
+  state.fxFilter.connect(state.musicGain);
   compressor.connect(state.masterGain);
   state.masterGain.connect(audio.destination);
   state.noiseBuffer = createNoiseBuffer(audio);
@@ -1298,20 +1356,47 @@ function blip(freq, duration = 0.05, gain = 0.07, type = "sine") {
   });
 }
 
-function scheduleTone({ freq, start, duration, gain, type = "sine", bus = state.musicGain, attack = 0.006, release = 0.05, detune = 0, sweepTo = null }) {
+function scheduleTone({
+  freq,
+  start,
+  duration,
+  gain,
+  type = "sine",
+  bus = state.musicGain,
+  attack = 0.006,
+  release = 0.05,
+  detune = 0,
+  sweepTo = null,
+  filterType = null,
+  filterFreq = 1400,
+  send = 0,
+}) {
   const audio = state.audio;
   if (!audio || !bus) return;
   const osc = audio.createOscillator();
+  const filter = filterType ? audio.createBiquadFilter() : null;
   const amp = audio.createGain();
   osc.type = type;
   osc.frequency.setValueAtTime(freq, start);
   if (sweepTo) osc.frequency.exponentialRampToValueAtTime(Math.max(1, sweepTo), start + duration);
   osc.detune.value = detune;
+  if (filter) {
+    filter.type = filterType;
+    filter.frequency.setValueAtTime(filterFreq, start);
+    filter.Q.value = 0.8;
+  }
   amp.gain.setValueAtTime(0.0001, start);
   amp.gain.exponentialRampToValueAtTime(Math.max(0.0002, gain), start + attack);
   amp.gain.exponentialRampToValueAtTime(0.0001, start + duration + release);
-  osc.connect(amp);
+  osc.connect(filter || amp);
+  if (filter) filter.connect(amp);
   amp.connect(bus);
+  if (send > 0 && state.fxDelay) {
+    const sendGain = audio.createGain();
+    sendGain.gain.value = send;
+    amp.connect(sendGain);
+    sendGain.connect(state.fxDelay);
+  }
   osc.start(start);
   osc.stop(start + duration + release + 0.02);
 }
@@ -1383,6 +1468,10 @@ function updateMusic() {
   if (!audio || state.mode !== "playing") return;
   ensureAudioRunning();
   const songNow = getSongTime();
+  const energy = getMusicEnergy();
+  state.musicGain?.gain.setTargetAtTime(MUSIC_GAIN + energy * 0.045, audio.currentTime, 0.08);
+  state.fxFeedback?.gain.setTargetAtTime(0.22 + energy * 0.035, audio.currentTime, 0.12);
+  state.fxFilter?.frequency.setTargetAtTime(620 + energy * 120, audio.currentTime, 0.12);
   const currentStep = Math.floor(songNow / MUSIC_STEP_SECONDS);
   if (state.musicNextStep < currentStep) state.musicNextStep = currentStep;
   while (state.musicNextStep * MUSIC_STEP_SECONDS <= songNow + MUSIC_LOOKAHEAD_SECONDS) {
@@ -1398,18 +1487,37 @@ function scheduleMusicStep(stepIndex) {
   const start = Math.max(audio.currentTime + 0.002, state.musicStartAt + songTime);
   const stepInBar = stepIndex % 16;
   const bar = Math.floor(stepIndex / 16);
+  const phraseBar = bar % 16;
+  const chord = getSongChord(bar);
+  const energy = getMusicEnergy();
   const beat = stepIndex / 4;
   const hit = getRhythmHitAtMusicBeat(beat);
 
   if ([0, 6, 10].includes(stepInBar) || (bar % 2 === 1 && stepInBar === 14)) {
-    scheduleKickDrum(start, stepInBar === 0 ? 1 : 0.72);
+    scheduleKickDrum(start, stepInBar === 0 ? 1 + energy * 0.08 : 0.72 + energy * 0.04);
   }
-  if (stepInBar === 4 || stepInBar === 12) scheduleSnareDrum(start, stepInBar === 12 ? 0.86 : 0.74);
-  if (stepInBar % 2 === 0) scheduleHat(start, stepInBar % 4 === 0 ? 0.9 : 0.55);
-  if ((bar + stepInBar) % 4 === 3) scheduleHat(start + MUSIC_STEP_SECONDS * 0.48, 0.28);
+  if (stepInBar === 4 || stepInBar === 12) scheduleSnareDrum(start, stepInBar === 12 ? 0.9 + energy * 0.05 : 0.74);
+  if (stepInBar % 2 === 0) scheduleHat(start, stepInBar % 4 === 0 ? 0.92 : 0.55 + energy * 0.06);
+  if ((bar + stepInBar) % 4 === 3) scheduleHat(start + MUSIC_STEP_SECONDS * 0.48, 0.28 + energy * 0.04);
+  if (energy >= 2 && stepInBar % 4 === 2) scheduleOpenHat(start, 0.32);
 
-  scheduleBassStep(start, stepInBar, bar);
+  if (stepInBar === 0) schedulePadChord(start, chord, energy, phraseBar);
+  scheduleBassStep(start, stepInBar, bar, chord, energy);
+  scheduleArpStep(start, stepInBar, bar, chord, energy);
+  scheduleLeadStep(start, stepInBar, bar, hit, chord, energy);
+  if (phraseBar === 15 && stepInBar >= 12) schedulePhraseLift(start, stepInBar, energy);
   if (hit) scheduleTargetTick(start, hit);
+}
+
+function getSongChord(bar) {
+  return songChords[Math.floor((bar % 16) / 4)];
+}
+
+function getMusicEnergy() {
+  const comboEnergy = Math.min(2, Math.floor(state.combo / 6));
+  const alienEnergy = Math.min(1, state.alienIndex * 0.5);
+  const timeEnergy = state.timeLeft < 25 ? 1 : 0;
+  return Math.min(3, comboEnergy + alienEnergy + timeEnergy);
 }
 
 function getRhythmHitAtMusicBeat(musicBeat) {
@@ -1452,25 +1560,122 @@ function scheduleHat(start, strength = 1) {
   scheduleNoise({ start, duration: 0.038, gain: 0.035 * strength, filterType: "highpass", freq: 7200, q: 0.7 });
 }
 
-function scheduleBassStep(start, stepInBar, bar) {
-  const bass = {
-    0: 55,
-    3: 55,
-    6: 65.41,
-    8: 73.42,
-    10: 65.41,
-    14: bar % 2 ? 82.41 : 49,
-  }[stepInBar];
+function scheduleOpenHat(start, strength = 1) {
+  scheduleNoise({ start, duration: 0.14, gain: 0.026 * strength, filterType: "highpass", freq: 6100, q: 0.7 });
+}
+
+function schedulePadChord(start, chord, energy, phraseBar) {
+  const padGain = 0.0065 + energy * 0.0018;
+  chord.pad.forEach((freq, i) => {
+    scheduleTone({
+      freq,
+      start: start + i * 0.009,
+      duration: BEAT_SECONDS * (phraseBar % 4 === 3 ? 3.2 : 3.75),
+      gain: padGain,
+      type: i % 2 ? "triangle" : "sine",
+      bus: state.musicGain,
+      attack: 0.22,
+      release: 0.55,
+      detune: i % 2 ? 5 : -4,
+      filterType: "lowpass",
+      filterFreq: 1400 + energy * 360,
+      send: 0.16 + energy * 0.035,
+    });
+  });
+}
+
+function scheduleBassStep(start, stepInBar, bar, chord, energy) {
+  const offsets = {
+    0: 1,
+    3: 1,
+    6: 1.5,
+    8: 2,
+    10: 1.5,
+    14: bar % 2 ? 2.25 : 0.75,
+  };
+  const offset = offsets[stepInBar];
+  const bass = offset ? chord.bass * offset : null;
   if (!bass) return;
   scheduleTone({
     freq: bass,
     start,
-    duration: MUSIC_STEP_SECONDS * 1.25,
-    gain: 0.07,
+    duration: MUSIC_STEP_SECONDS * (stepInBar === 0 ? 1.5 : 1.16),
+    gain: 0.072 + energy * 0.008,
     type: "sawtooth",
     bus: state.musicGain,
     attack: 0.008,
     release: 0.08,
+    filterType: "lowpass",
+    filterFreq: 520 + energy * 90,
+  });
+}
+
+function scheduleArpStep(start, stepInBar, bar, chord, energy) {
+  const active = energy > 0 || bar % 4 >= 2;
+  if (!active || ![1, 3, 5, 7, 9, 11, 13, 15].includes(stepInBar)) return;
+  const arpIndex = (stepInBar + bar * 2) % chord.arp.length;
+  const freq = chord.arp[arpIndex] * (energy >= 2 && stepInBar % 8 === 7 ? 2 : 1);
+  scheduleTone({
+    freq,
+    start,
+    duration: MUSIC_STEP_SECONDS * 0.64,
+    gain: 0.018 + energy * 0.004,
+    type: "triangle",
+    bus: state.musicGain,
+    attack: 0.004,
+    release: 0.08,
+    filterType: "highpass",
+    filterFreq: 680,
+    send: 0.24,
+  });
+}
+
+function scheduleLeadStep(start, stepInBar, bar, hit, chord, energy) {
+  const motif = leadMotifs[Math.floor((bar % 16) / 4)];
+  const phraseStep = (bar % 4) * 4 + Math.floor(stepInBar / 4);
+  const playBeatLead = stepInBar % 4 === 0 && (bar % 4 >= 1 || hit || energy >= 1);
+  const playAnswer = energy >= 2 && (stepInBar === 6 || stepInBar === 14);
+  if (!playBeatLead && !playAnswer) return;
+  const freq = playAnswer ? chord.arp[(bar + stepInBar) % chord.arp.length] : motif[phraseStep % motif.length];
+  scheduleTone({
+    freq,
+    start: start + (playAnswer ? MUSIC_STEP_SECONDS * 0.12 : 0),
+    duration: playAnswer ? MUSIC_STEP_SECONDS * 0.72 : MUSIC_STEP_SECONDS * 1.45,
+    gain: (hit?.accent ? 0.045 : 0.032) + energy * 0.004,
+    type: "square",
+    bus: state.musicGain,
+    attack: 0.006,
+    release: 0.11,
+    filterType: "lowpass",
+    filterFreq: 1700 + energy * 360,
+    send: 0.21,
+  });
+  scheduleTone({
+    freq: freq * 2,
+    start: start + 0.012,
+    duration: MUSIC_STEP_SECONDS * 0.72,
+    gain: 0.008 + energy * 0.002,
+    type: "sine",
+    bus: state.musicGain,
+    attack: 0.008,
+    release: 0.12,
+    send: 0.28,
+  });
+}
+
+function schedulePhraseLift(start, stepInBar, energy) {
+  const lift = [NOTE.A4, NOTE.C5, NOTE.E5, NOTE.A5][stepInBar - 12];
+  if (!lift) return;
+  scheduleTone({
+    freq: lift,
+    start,
+    duration: MUSIC_STEP_SECONDS * 0.7,
+    gain: 0.018 + energy * 0.004,
+    type: "triangle",
+    bus: state.musicGain,
+    attack: 0.003,
+    release: 0.08,
+    send: 0.34,
   });
 }
 
