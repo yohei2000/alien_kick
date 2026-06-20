@@ -71,6 +71,21 @@ const leadMotifs = [
   [NOTE.E5, NOTE.GS4, NOTE.B4, NOTE.E5, NOTE.F5, NOTE.E5, NOTE.B4, NOTE.GS4],
 ];
 
+const alienMusicProfiles = {
+  Slime: {
+    wobble: [NOTE.C4, NOTE.E4, NOTE.G4, NOTE.A4],
+    sparkle: 0x32d48d,
+  },
+  Mantis: {
+    blades: [NOTE.D5, NOTE.F5, NOTE.A5, NOTE.C5],
+    sparkle: 0xffbe3d,
+  },
+  Psychic: {
+    shimmer: [NOTE.GS4, NOTE.B4, NOTE.E5, NOTE.G5],
+    sparkle: 0x58efff,
+  },
+};
+
 const rhythmPatterns = [
   {
     name: "FOUR KICK",
@@ -190,6 +205,7 @@ const state = {
   musicStartAt: 0,
   musicPauseAt: 0,
   musicNextStep: 0,
+  lastComboTier: 0,
   alienIndex: 0,
   alienHp: aliens[0].hp,
   alienDownUntil: 0,
@@ -1210,6 +1226,7 @@ function resetGame() {
   state.score = 0;
   state.combo = 0;
   state.maxCombo = 0;
+  state.lastComboTier = 0;
   state.beat = 0;
   state.lastSongTime = 0;
   resetRhythmSequencer();
@@ -1505,6 +1522,8 @@ function scheduleMusicStep(stepIndex) {
   scheduleBassStep(start, stepInBar, bar, chord, energy);
   scheduleArpStep(start, stepInBar, bar, chord, energy);
   scheduleLeadStep(start, stepInBar, bar, hit, chord, energy);
+  scheduleAlienLayer(start, stepInBar, bar, chord, energy);
+  scheduleComboGroove(start, stepInBar, energy);
   if (phraseBar === 15 && stepInBar >= 12) schedulePhraseLift(start, stepInBar, energy);
   if (hit) scheduleTargetTick(start, hit);
 }
@@ -1663,6 +1682,120 @@ function scheduleLeadStep(start, stepInBar, bar, hit, chord, energy) {
   });
 }
 
+function scheduleAlienLayer(start, stepInBar, bar, chord, energy) {
+  const alien = aliens[state.alienIndex];
+  if (alien.type === "Slime") scheduleSlimeMusic(start, stepInBar, bar, energy);
+  if (alien.type === "Mantis") scheduleMantisMusic(start, stepInBar, bar, energy);
+  if (alien.type === "Psychic") schedulePsychicMusic(start, stepInBar, bar, chord, energy);
+}
+
+function scheduleSlimeMusic(start, stepInBar, bar, energy) {
+  if (![2, 5, 10, 13].includes(stepInBar)) return;
+  const profile = alienMusicProfiles.Slime;
+  const freq = profile.wobble[(bar + stepInBar) % profile.wobble.length];
+  scheduleTone({
+    freq: freq * 0.5,
+    sweepTo: freq * (stepInBar % 2 ? 0.62 : 0.78),
+    start: start + MUSIC_STEP_SECONDS * 0.08,
+    duration: MUSIC_STEP_SECONDS * 0.9,
+    gain: 0.026 + energy * 0.004,
+    type: "sine",
+    bus: state.musicGain,
+    attack: 0.01,
+    release: 0.12,
+    filterType: "lowpass",
+    filterFreq: 920 + energy * 110,
+    send: 0.12,
+  });
+}
+
+function scheduleMantisMusic(start, stepInBar, bar, energy) {
+  if (![3, 7, 11, 15].includes(stepInBar)) return;
+  const profile = alienMusicProfiles.Mantis;
+  const freq = profile.blades[(bar + stepInBar) % profile.blades.length];
+  scheduleTone({
+    freq,
+    start,
+    duration: MUSIC_STEP_SECONDS * 0.33,
+    gain: 0.022 + energy * 0.004,
+    type: "square",
+    bus: state.musicGain,
+    attack: 0.002,
+    release: 0.045,
+    filterType: "highpass",
+    filterFreq: 1400,
+    send: 0.08,
+  });
+  scheduleNoise({
+    start: start + MUSIC_STEP_SECONDS * 0.08,
+    duration: 0.026,
+    gain: 0.022 + energy * 0.004,
+    bus: state.musicGain,
+    filterType: "bandpass",
+    freq: 3500,
+    q: 2.2,
+  });
+}
+
+function schedulePsychicMusic(start, stepInBar, bar, chord, energy) {
+  if (![0, 5, 9, 14].includes(stepInBar)) return;
+  const profile = alienMusicProfiles.Psychic;
+  const freq = profile.shimmer[(bar + stepInBar) % profile.shimmer.length];
+  scheduleTone({
+    freq: freq * 2,
+    start: start + MUSIC_STEP_SECONDS * 0.18,
+    duration: BEAT_SECONDS * 1.25,
+    gain: 0.012 + energy * 0.003,
+    type: "sine",
+    bus: state.musicGain,
+    attack: 0.08,
+    release: 0.22,
+    filterType: "highpass",
+    filterFreq: 900,
+    send: 0.42,
+  });
+  if (stepInBar === 0) {
+    scheduleTone({
+      freq: chord.pad[2] * 2,
+      start: start + MUSIC_STEP_SECONDS * 0.5,
+      duration: BEAT_SECONDS * 2.5,
+      gain: 0.007 + energy * 0.002,
+      type: "triangle",
+      bus: state.musicGain,
+      attack: 0.18,
+      release: 0.38,
+      send: 0.5,
+    });
+  }
+}
+
+function scheduleComboGroove(start, stepInBar, energy) {
+  if (energy < 1) return;
+  if (stepInBar === 2 || stepInBar === 10) {
+    scheduleNoise({
+      start: start + MUSIC_STEP_SECONDS * 0.38,
+      duration: 0.035,
+      gain: 0.024 + energy * 0.005,
+      bus: state.musicGain,
+      filterType: "highpass",
+      freq: 8200,
+    });
+  }
+  if (energy >= 3 && (stepInBar === 7 || stepInBar === 15)) {
+    scheduleTone({
+      freq: NOTE.A5,
+      start: start + MUSIC_STEP_SECONDS * 0.18,
+      duration: MUSIC_STEP_SECONDS * 0.42,
+      gain: 0.018,
+      type: "triangle",
+      bus: state.musicGain,
+      attack: 0.003,
+      release: 0.08,
+      send: 0.34,
+    });
+  }
+}
+
 function schedulePhraseLift(start, stepInBar, energy) {
   const lift = [NOTE.A4, NOTE.C5, NOTE.E5, NOTE.A5][stepInBar - 12];
   if (!lift) return;
@@ -1721,6 +1854,21 @@ function playKickImpactSfx(timing) {
   const hard = timing === "hard";
   scheduleTone({ freq: hard ? 132 : 118, sweepTo: hard ? 72 : 86, start, duration: hard ? 0.12 : 0.08, gain: hard ? 0.16 : 0.1, type: "sine", bus: state.sfxGain, attack: 0.002 });
   scheduleNoise({ start, duration: hard ? 0.09 : 0.055, gain: hard ? 0.09 : 0.045, bus: state.sfxGain, filterType: "bandpass", freq: hard ? 1500 : 1200 });
+  if (hard) {
+    [NOTE.A4, NOTE.E5, NOTE.A5].forEach((freq, i) => {
+      scheduleTone({
+        freq,
+        start: start + i * 0.025,
+        duration: 0.09,
+        gain: 0.038,
+        type: "triangle",
+        bus: state.sfxGain,
+        attack: 0.002,
+        release: 0.07,
+        send: 0.22,
+      });
+    });
+  }
 }
 
 function playGoalSfx(timing) {
@@ -1765,6 +1913,83 @@ function playKnockdownSfx() {
   const start = audio.currentTime;
   scheduleTone({ freq: 92, sweepTo: 34, start, duration: 0.24, gain: 0.15, type: "square", bus: state.sfxGain, attack: 0.003, release: 0.12 });
   scheduleNoise({ start, duration: 0.22, gain: 0.09, bus: state.sfxGain, filterType: "lowpass", freq: 700 });
+  [NOTE.A3, NOTE.C4, NOTE.E4, NOTE.A4].forEach((freq, i) => {
+    scheduleTone({
+      freq,
+      start: start + 0.12 + i * 0.035,
+      duration: 0.26,
+      gain: 0.045,
+      type: i % 2 ? "triangle" : "sine",
+      bus: state.sfxGain,
+      attack: 0.01,
+      release: 0.18,
+      send: 0.32,
+    });
+  });
+}
+
+function playComboTierSfx(tier) {
+  const audio = state.audio;
+  if (!audio) return;
+  const start = audio.currentTime;
+  const root = [NOTE.C5, NOTE.E5, NOTE.G5, NOTE.A5][Math.max(0, tier - 1)] || NOTE.C5;
+  [root, root * 1.25, root * 1.5].forEach((freq, i) => {
+    scheduleTone({
+      freq,
+      start: start + i * 0.04,
+      duration: 0.12 + tier * 0.015,
+      gain: 0.032 + tier * 0.004,
+      type: "triangle",
+      bus: state.sfxGain,
+      attack: 0.003,
+      release: 0.1,
+      send: 0.35,
+    });
+  });
+}
+
+function playWinFanfare() {
+  const audio = state.audio;
+  if (!audio) return;
+  const start = audio.currentTime;
+  const notes = [NOTE.A4, NOTE.C5, NOTE.E5, NOTE.A5, NOTE.B5, NOTE.A5];
+  notes.forEach((freq, i) => {
+    scheduleTone({
+      freq,
+      start: start + i * 0.09,
+      duration: i >= 3 ? 0.28 : 0.16,
+      gain: 0.06,
+      type: i % 2 ? "square" : "triangle",
+      bus: state.sfxGain,
+      attack: 0.004,
+      release: 0.16,
+      filterType: "lowpass",
+      filterFreq: 2400,
+      send: 0.42,
+    });
+  });
+  scheduleNoise({ start: start + 0.18, duration: 0.28, gain: 0.08, bus: state.sfxGain, filterType: "highpass", freq: 5000 });
+}
+
+function playLoseStinger() {
+  const audio = state.audio;
+  if (!audio) return;
+  const start = audio.currentTime;
+  [NOTE.E4, NOTE.C4, NOTE.A3].forEach((freq, i) => {
+    scheduleTone({
+      freq,
+      start: start + i * 0.11,
+      duration: 0.22,
+      gain: 0.05,
+      type: "sawtooth",
+      bus: state.sfxGain,
+      attack: 0.006,
+      release: 0.18,
+      filterType: "lowpass",
+      filterFreq: 900,
+      send: 0.25,
+    });
+  });
 }
 
 function updateRhythmFeed() {
@@ -1844,6 +2069,7 @@ function resolveShot(ball, timing) {
     state.score += points + Math.floor(state.combo / 10);
     state.combo += 1;
     state.maxCombo = Math.max(state.maxCombo, state.combo);
+    updateComboMusicTier();
     popFeedback(timing === "hard" ? "HARD HIT!" : timing === "good" ? "NICE!" : "GOAL", timing === "hard" ? "#ffd166" : "#41e7ff");
     sceneRef.flash.alpha = timing === "hard" ? 0.28 : 0.12;
     sceneRef.cameras.main.shake(timing === "hard" ? 180 : 110, timing === "hard" ? 0.012 : 0.006);
@@ -1926,7 +2152,15 @@ function nextAlien() {
 
 function registerMiss() {
   state.combo = 0;
+  state.lastComboTier = 0;
   sceneRef?.cameras.main.shake(90, 0.005);
+}
+
+function updateComboMusicTier() {
+  const tier = Math.min(4, Math.floor(state.combo / 5));
+  if (tier <= state.lastComboTier) return;
+  state.lastComboTier = tier;
+  playComboTierSfx(tier);
 }
 
 function emitShotParticles(ball, timing, goal) {
@@ -1998,6 +2232,8 @@ function togglePause() {
 function endGame(win) {
   if (state.mode !== "playing") return;
   state.mode = win ? "win" : "lose";
+  if (win) playWinFanfare();
+  else playLoseStinger();
   const copy = win
     ? `${aliens.length}体撃破、${state.score}点、最大${state.maxCombo}コンボ。地球代表の完全勝利です。`
     : `${state.score}点で終了。残りのエイリアンを倒しきれませんでした。`;
