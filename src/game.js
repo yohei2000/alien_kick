@@ -549,6 +549,7 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.expression = "neutral";
     this.expressionUntil = 0;
     this.saveLane = 1;
+    this.laneMatched = true;
     this.actionUntilMs = 0;
     this.actionKind = "block";
   }
@@ -557,6 +558,7 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.alien = alien;
     this.expression = "neutral";
     this.expressionUntil = 0;
+    this.laneMatched = true;
     this.sprite.setTexture(alien.assetKey);
     this.sprite.setOrigin(0.5, alien.type === "Mantis" ? 0.84 : alien.type === "Psychic" ? 0.72 : 0.62);
     this.introPose();
@@ -591,16 +593,18 @@ class AlienKeeperAnimator extends CharacterAnimator {
     });
   }
 
-  playSave(goal, aimLane, timing) {
+  playSave(goal, aimLane, timing, laneMatched = true) {
     this.saveLane = aimLane;
+    this.laneMatched = laneMatched;
     this.expression = goal ? "fail" : "save";
-    this.expressionUntil = state.beat + (goal ? 0.7 : 0.52);
+    this.expressionUntil = state.beat + (goal ? 0.7 : laneMatched ? 0.52 : 0.76);
     this.setState(goal ? "saveFail" : "saveSuccess", { force: true, timing });
-    if (!goal) this.showAction("block", 320);
+    if (!goal) this.showAction("block", laneMatched ? 320 : 420);
+    const readBoost = laneMatched ? 1 : 1.55;
     this.scene.tweens.add({
       targets: this.container,
-      x: this.container.x + (aimLane - 1) * (goal ? 7 : 18),
-      duration: 85,
+      x: this.container.x + (aimLane - 1) * (goal ? 7 : 18 * readBoost),
+      duration: laneMatched ? 85 : 70,
       yoyo: true,
       ease: "Quad.Out",
     });
@@ -650,11 +654,13 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.actionUntilMs = Math.max(this.actionUntilMs, this.scene.time.now + durationMs);
     this.actionSprite.setTexture(kind === "hardhit" ? "alien-hardhit" : "alien-block");
     this.actionSprite.setAlpha(kind === "hardhit" ? 1 : 0.96);
-    this.actionSprite.setScale(0.82);
+    this.actionSprite.clearTint();
+    this.actionSprite.setScale(this.laneMatched === false && kind === "block" ? 0.95 : 0.82);
+    if (this.laneMatched === false && kind === "block") this.actionSprite.setTint(0xfff6cf);
     this.scene.tweens.add({
       targets: this.actionSprite,
-      scaleX: kind === "hardhit" ? 0.98 : 0.9,
-      scaleY: kind === "hardhit" ? 0.98 : 0.9,
+      scaleX: kind === "hardhit" ? 0.98 : this.laneMatched === false ? 1.06 : 0.9,
+      scaleY: kind === "hardhit" ? 0.98 : this.laneMatched === false ? 1.06 : 0.9,
       duration: 110,
       ease: "Back.Out",
     });
@@ -662,12 +668,13 @@ class AlienKeeperAnimator extends CharacterAnimator {
 
   drawActionSprite(pose, alien) {
     const hardhit = this.actionKind === "hardhit";
-    const height = Math.min(getWidth() * (hardhit ? 0.43 : 0.38), hardhit ? 164 : 146);
+    const readBlock = this.laneMatched === false && !hardhit;
+    const height = Math.min(getWidth() * (hardhit ? 0.43 : readBlock ? 0.44 : 0.38), hardhit ? 164 : readBlock ? 168 : 146);
     this.actionSprite.setDisplaySize(height, height);
-    this.actionSprite.setPosition((this.saveLane - 1) * (hardhit ? 7 : 16), hardhit ? -8 : -3);
-    this.actionSprite.setAngle((this.saveLane - 1) * (hardhit ? -8 : 7) + Math.sin(state.beat * 14) * 1.6);
-    this.fx.lineStyle(hardhit ? 5 : 3, hardhit ? 0xffd166 : alien.accent, hardhit ? 0.55 : 0.28);
-    this.fx.strokeCircle(0, 0, pose.s * (hardhit ? 1.48 : 1.18));
+    this.actionSprite.setPosition((this.saveLane - 1) * (hardhit ? 7 : readBlock ? 24 : 16), hardhit ? -8 : readBlock ? -9 : -3);
+    this.actionSprite.setAngle((this.saveLane - 1) * (hardhit ? -8 : readBlock ? 12 : 7) + Math.sin(state.beat * 14) * 1.6);
+    this.fx.lineStyle(hardhit ? 5 : readBlock ? 4 : 3, hardhit ? 0xffd166 : readBlock ? 0xfff6cf : alien.accent, hardhit ? 0.55 : readBlock ? 0.48 : 0.28);
+    this.fx.strokeCircle(0, 0, pose.s * (hardhit ? 1.48 : readBlock ? 1.38 : 1.18));
   }
 
   drawSlimeSprite(pose, down, baseWidth, baseHeight) {
@@ -2449,7 +2456,8 @@ function kickAt(clientX) {
     return;
   }
 
-  state.aimX = Phaser.Math.Clamp(clientX / getWidth(), 0.08, 0.92);
+  const tapLane = tapLaneFromX(clientX);
+  state.aimX = aimXForLane(tapLane);
   const inputSongTime = getInputSongTime();
   const active = sceneRef.balls
     .filter((ball) => !ball.hit && !ball.missed)
@@ -2474,8 +2482,15 @@ function kickAt(clientX) {
   active.ball.judgedAt = inputSongTime;
   active.ball.hitPoint = active.hitPoint;
   active.ball.signedDiff = active.signedDiff;
+  active.ball.tapLane = tapLane;
+  active.ball.laneMatched = tapLane === active.ball.lane;
   const timing = active.diff <= PERFECT_WINDOW ? "hard" : active.diff <= GOOD_WINDOW ? "good" : "ok";
-  showJudge(timing === "hard" ? "PERFECT" : timing === "good" ? "GREAT" : "GOOD", timing === "hard" ? 0xfff6cf : timing === "good" ? 0x41e7ff : 0xa9ff6e, active.signedDiff);
+  if (active.ball.laneMatched) {
+    showJudge(timing === "hard" ? "PERFECT" : timing === "good" ? "GREAT" : "GOOD", timing === "hard" ? 0xfff6cf : timing === "good" ? 0x41e7ff : 0xa9ff6e, active.signedDiff);
+  } else {
+    showJudge("WRONG LANE", 0xff4f79, active.signedDiff);
+    popFeedback("WRONG LANE", "#ff4f79");
+  }
   state.hitStopTimer = HIT_STOP_SECONDS;
   sceneRef?.kicker.kick(timing, active.hitPoint);
   playKickImpactSfx(timing);
@@ -2487,16 +2502,15 @@ function resolveShot(ball, timing) {
   const alien = aliens[state.alienIndex];
   const down = state.alienDownUntil > state.beat;
   const powerBand = 1 + Math.floor(state.combo / 6) * 0.18;
-  const aimLane = state.aimX < 0.38 ? 0 : state.aimX > 0.62 ? 2 : 1;
-  const bait = aimLane === ball.lane ? 0.06 : 0;
-  const blockChance = Phaser.Math.Clamp(
-    alien.block + bait - (down ? 0.3 : 0) - (timing === "hard" ? 0.2 : 0),
-    0.04,
-    0.72,
-  );
-  const goal = Math.random() > blockChance;
-  const shot = createShot(ball, timing, goal, aimLane);
-  sceneRef?.alienVisual.playSave(goal, aimLane, timing);
+  const shotLane = Number.isInteger(ball.tapLane) ? ball.tapLane : ball.lane;
+  const laneMatched = ball.laneMatched !== false && shotLane === ball.lane;
+  const timingBonus = timing === "hard" ? 0.2 : timing === "good" ? 0.1 : 0;
+  const blockChance = laneMatched
+    ? Phaser.Math.Clamp(alien.block - 0.1 - (down ? 0.3 : 0) - timingBonus, 0.03, 0.68)
+    : 0.98;
+  const goal = laneMatched && Math.random() > blockChance;
+  const shot = createShot(ball, timing, goal, shotLane);
+  sceneRef?.alienVisual.playSave(goal, shotLane, timing, laneMatched);
   sceneRef?.alienVisual.emitContactEffect(shot.contactX, shot.contactY, goal, timing);
   sceneRef?.kicker.react(goal);
 
@@ -2511,10 +2525,10 @@ function resolveShot(ball, timing) {
     sceneRef.cameras.main.shake(timing === "hard" ? 180 : 110, timing === "hard" ? 0.012 : 0.006);
     playGoalSfx(timing);
     emitShotParticles(ball, timing, true);
-    emitGoalBurst(timing, aimLane);
+    emitGoalBurst(timing, shotLane);
   } else {
     registerMiss();
-    popFeedback("BLOCKED", `#${alien.color.toString(16).padStart(6, "0")}`);
+    popFeedback(laneMatched ? "BLOCKED" : "WRONG LANE", laneMatched ? `#${alien.color.toString(16).padStart(6, "0")}` : "#ff4f79");
     sceneRef.cameras.main.shake(120, 0.008);
     playBlockSfx(timing);
     emitShotParticles(ball, timing, false);
@@ -2802,6 +2816,18 @@ function rhythmGuideLayout() {
     right: ring.x + width / 2,
     laneXs: [ring.x - laneGap, ring.x, ring.x + laneGap],
   };
+}
+
+function tapLaneFromX(clientX) {
+  const guide = rhythmGuideLayout();
+  return guide.laneXs
+    .map((x, lane) => ({ lane, distance: Math.abs(clientX - x) }))
+    .sort((a, b) => a.distance - b.distance)[0].lane;
+}
+
+function aimXForLane(lane) {
+  const guide = rhythmGuideLayout();
+  return Phaser.Math.Clamp(guide.laneXs[lane] / getWidth(), 0.08, 0.92);
 }
 
 function ballPosition(ball) {
