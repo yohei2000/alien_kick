@@ -24,6 +24,7 @@ const MIN_AUDIO_LATENCY_COMPENSATION = 0.018;
 const MAX_AUDIO_LATENCY_COMPENSATION = 0.085;
 const MUSIC_STEP_SECONDS = BEAT_SECONDS / 4;
 const MUSIC_LOOKAHEAD_SECONDS = 0.18;
+const NOTE_HIGHWAY_PREVIEW_SECONDS = BEAT_SECONDS * 4;
 const RHYTHM_PATTERN_BEATS = 8;
 const FIRST_HIT_BEAT = 4;
 const MAIN_GAIN = 0.82;
@@ -240,6 +241,7 @@ const state = {
   duckUntil: 0,
   duckDepth: 0,
   duckDuration: 0,
+  lastJudge: null,
 };
 
 let sceneRef = null;
@@ -957,6 +959,18 @@ class KickScene extends Phaser.Scene {
     this.aim.setDepth(13);
     this.flash = this.add.rectangle(0, 0, 10, 10, 0xfff6cf, 0).setOrigin(0);
     this.flash.setDepth(30);
+    this.judgeText = this.add
+      .text(0, 0, "", {
+        fontFamily: "Inter, ui-sans-serif, system-ui, sans-serif",
+        fontSize: "20px",
+        fontStyle: "900",
+        color: "#ffffff",
+        stroke: "#06111d",
+        strokeThickness: 5,
+      })
+      .setOrigin(0.5)
+      .setDepth(31)
+      .setVisible(false);
     this.kicker = new KickerAnimator(this);
     this.alienVisual = AlienVisualFactory.create(this, aliens[state.alienIndex]);
     this.makeStars();
@@ -987,6 +1001,7 @@ class KickScene extends Phaser.Scene {
     this.kicker.update(getKickerCue());
     this.kicker.draw();
     this.drawAim();
+    this.updateJudgeText();
     this.flash.alpha = Phaser.Math.Clamp(this.flash.alpha - dt * 3.3, 0, 0.42);
   }
 
@@ -1051,15 +1066,76 @@ class KickScene extends Phaser.Scene {
 
   drawRhythmLane() {
     const ring = strikeRing();
+    const guide = rhythmGuideLayout();
     const g = this.rhythm;
-    const active = this.balls
-      .filter((ball) => !ball.hit && !ball.missed)
-      .map((ball) => ({ ball, timeToHit: ball.hitTime - state.beat, diff: Math.abs(ball.hitTime - state.beat) }))
-      .sort((a, b) => a.diff - b.diff)[0];
+    const guideNotes = collectRhythmGuideNotes(this);
+    const active = guideNotes.map((note) => ({ ...note, diff: Math.abs(note.timeToHit) })).sort((a, b) => a.diff - b.diff)[0];
     const approach = active ? 1 - Math.min(1, Math.max(0, active.timeToHit) / (BEAT_SECONDS * 1.5)) : 0;
     const hitGlow = active ? 1 - Math.min(1, active.diff / HIT_WINDOW) : 0;
-    const color = active?.ball.accent ? 0xff4f79 : hitGlow > 0.72 ? 0xffffff : 0xffd166;
+    const color = active?.accent ? 0xff4f79 : hitGlow > 0.72 ? 0xffffff : 0xffd166;
     g.clear();
+
+    g.fillStyle(0x06111d, 0.28);
+    g.fillRect(guide.left, guide.top, guide.width, guide.hitY - guide.top + 42);
+    g.lineStyle(2, 0xffffff, 0.14);
+    g.strokeRect(guide.left, guide.top, guide.width, guide.hitY - guide.top + 42);
+
+    for (const laneX of guide.laneXs) {
+      g.lineStyle(2, 0xeef8ff, 0.16);
+      g.lineBetween(laneX, guide.top + 6, laneX, guide.hitY + 32);
+      g.fillStyle(0x07131f, 0.58);
+      g.fillCircle(laneX, guide.hitY, 18);
+      g.lineStyle(3, 0xeef8ff, 0.36);
+      g.strokeCircle(laneX, guide.hitY, 18);
+    }
+
+    g.fillStyle(0x41e7ff, 0.09);
+    g.fillRect(guide.left, guide.hitY - 32, guide.width, 64);
+    g.fillStyle(0xffd166, 0.14);
+    g.fillRect(guide.left, guide.hitY - 14, guide.width, 28);
+    g.fillStyle(0xffffff, 0.2);
+    g.fillRect(guide.left, guide.hitY - 5, guide.width, 10);
+
+    const gridStep = BEAT_SECONDS / 2;
+    let gridTime = Math.ceil((state.beat - 0.001) / gridStep) * gridStep;
+    for (let i = 0; i < 10; i += 1) {
+      const timeToLine = gridTime - state.beat;
+      if (timeToLine > NOTE_HIGHWAY_PREVIEW_SECONDS) break;
+      if (timeToLine >= 0) {
+        const gridY = lerp(guide.hitY, guide.top, timeToLine / NOTE_HIGHWAY_PREVIEW_SECONDS);
+        const strong = Math.abs(gridTime / BEAT_SECONDS - Math.round(gridTime / BEAT_SECONDS)) < 0.001;
+        g.lineStyle(strong ? 2 : 1, strong ? 0xffd166 : 0xeef8ff, strong ? 0.32 : 0.16);
+        g.lineBetween(guide.left + 8, gridY, guide.right - 8, gridY);
+      }
+      gridTime += gridStep;
+    }
+
+    for (const note of guideNotes) {
+      const { timeToHit } = note;
+      const laneX = guide.laneXs[note.lane];
+      const y =
+        timeToHit >= 0
+          ? lerp(guide.hitY, guide.top, Math.min(1, timeToHit / NOTE_HIGHWAY_PREVIEW_SECONDS))
+          : guide.hitY + Math.min(32, Math.abs(timeToHit) * 130);
+      const closeness = 1 - Math.min(1, Math.abs(timeToHit) / HIT_WINDOW);
+      const noteColor = note.accent ? 0xff4f79 : closeness > 0.72 ? 0xffffff : 0xffd166;
+      const noteRadius = 8 + closeness * 8 + (note.accent ? 2 : 0);
+      const alpha = timeToHit < -HIT_WINDOW ? 0.26 : note.spawned ? 0.92 : 0.42;
+      g.lineStyle(2 + closeness * 3, noteColor, 0.18 + closeness * 0.42);
+      g.lineBetween(laneX, y, laneX, guide.hitY);
+      g.fillStyle(noteColor, alpha);
+      g.fillCircle(laneX, y, noteRadius);
+      g.lineStyle(note.spawned ? 3 : 2, note.spawned ? 0x06111d : noteColor, note.spawned ? 0.64 : 0.5);
+      g.strokeCircle(laneX, y, noteRadius * (note.spawned ? 0.62 : 1.55));
+      if (note.accent) {
+        g.lineStyle(3, 0xffffff, 0.5 + closeness * 0.28);
+        g.strokeCircle(laneX, y, noteRadius + 6);
+      }
+    }
+
+    g.lineStyle(5 + hitGlow * 4, color, 0.78 + hitGlow * 0.22);
+    g.lineBetween(guide.left + 4, guide.hitY, guide.right - 4, guide.hitY);
+
     g.lineStyle(14 + approach * 8, color, 0.16 + approach * 0.14);
     g.strokeCircle(ring.x, ring.y, ring.r);
     g.lineStyle(4 + hitGlow * 5, color, 0.78 + hitGlow * 0.22);
@@ -1075,6 +1151,35 @@ class KickScene extends Phaser.Scene {
     }
     g.fillStyle(0xffffff, 0.18);
     g.fillRect(ring.x - 2, ring.y - ring.r - 18, 4, ring.r * 2 + 36);
+
+    if (state.lastJudge && state.beat < state.lastJudge.until) {
+      const judgeT = 1 - (state.lastJudge.until - state.beat) / state.lastJudge.duration;
+      const alpha = Phaser.Math.Clamp(1 - judgeT, 0, 1);
+      const meterY = guide.hitY + 38;
+      const markerX = guide.ring.x + Phaser.Math.Clamp(state.lastJudge.signedDiff / HIT_WINDOW, -1, 1) * 44;
+      g.lineStyle(3, 0xffffff, 0.18 * alpha);
+      g.lineBetween(guide.ring.x - 48, meterY, guide.ring.x + 48, meterY);
+      g.lineStyle(2, 0xffffff, 0.32 * alpha);
+      g.lineBetween(guide.ring.x, meterY - 9, guide.ring.x, meterY + 9);
+      g.fillStyle(state.lastJudge.color, 0.86 * alpha);
+      g.fillCircle(markerX, meterY, 6 + alpha * 2);
+    }
+  }
+
+  updateJudgeText() {
+    const judge = state.lastJudge;
+    if (!judge || state.mode !== "playing" || state.beat >= judge.until) {
+      this.judgeText.setVisible(false);
+      return;
+    }
+    const guide = rhythmGuideLayout();
+    const remain = Phaser.Math.Clamp((judge.until - state.beat) / judge.duration, 0, 1);
+    this.judgeText
+      .setText(judge.text)
+      .setColor(cssColor(judge.color))
+      .setPosition(guide.ring.x, guide.hitY - guide.ring.r - 34 - (1 - remain) * 10)
+      .setAlpha(remain)
+      .setVisible(true);
   }
 
   drawAim() {
@@ -1276,6 +1381,7 @@ function resetGame() {
   state.duckUntil = 0;
   state.duckDepth = 0;
   state.duckDuration = 0;
+  state.lastJudge = null;
   if (sceneRef) {
     sceneRef.clearDynamicObjects();
     sceneRef.setAlienVisual(aliens[state.alienIndex]);
@@ -1687,6 +1793,39 @@ function getRhythmHitAtMusicBeat(musicBeat, leadBeats = 0) {
   const pattern = rhythmPatterns[patternCycle % rhythmPatterns.length];
   const hit = pattern.hits.find((entry) => Math.abs(entry.beat - localBeat) < 0.001);
   return hit ? { ...hit, leadBeats, patternName: pattern.name } : null;
+}
+
+function collectRhythmGuideNotes(scene) {
+  const notes = [];
+  const nowMusicBeat = state.beat / BEAT_SECONDS;
+  const previewBeats = NOTE_HIGHWAY_PREVIEW_SECONDS / BEAT_SECONDS;
+  const firstCycle = Math.max(0, Math.floor((nowMusicBeat - FIRST_HIT_BEAT - 0.001) / RHYTHM_PATTERN_BEATS));
+  const lastMusicBeat = nowMusicBeat + previewBeats + 0.5;
+  const lastCycle = Math.max(firstCycle, Math.ceil((lastMusicBeat - FIRST_HIT_BEAT) / RHYTHM_PATTERN_BEATS) + 1);
+
+  for (let cycle = firstCycle; cycle <= lastCycle; cycle += 1) {
+    const pattern = rhythmPatterns[cycle % rhythmPatterns.length];
+    for (const hit of pattern.hits) {
+      const hitMusicBeat = FIRST_HIT_BEAT + cycle * RHYTHM_PATTERN_BEATS + hit.beat;
+      const hitTime = hitMusicBeat * BEAT_SECONDS;
+      const timeToHit = hitTime - state.beat;
+      if (timeToHit > NOTE_HIGHWAY_PREVIEW_SECONDS + 0.05 || timeToHit < -HIT_WINDOW * 1.6) continue;
+      const ball = scene?.balls.find(
+        (entry) => Math.abs(entry.hitTime - hitTime) < 0.012 && entry.lane === hit.lane && entry.side === hit.side,
+      );
+      if (ball?.hit || ball?.missed) continue;
+      notes.push({
+        ...hit,
+        patternName: pattern.name,
+        hitTime,
+        timeToHit,
+        spawned: Boolean(ball),
+        ball,
+      });
+    }
+  }
+
+  return notes.sort((a, b) => b.timeToHit - a.timeToHit);
 }
 
 function scheduleKickDrum(start, strength = 1) {
@@ -2324,7 +2463,9 @@ function kickAt(clientX) {
     sceneRef?.kicker.setState("missReact", { force: true });
     sceneRef.kicker.lockedUntilMs = sceneRef.time.now + 360;
     registerMiss();
-    popFeedback("MISS", "#92a9bc");
+    const earlyLate = active ? (active.signedDiff < 0 ? "EARLY" : "LATE") : "WAIT";
+    showJudge(earlyLate, 0x92a9bc, active?.signedDiff || -HIT_WINDOW);
+    popFeedback(earlyLate, "#92a9bc");
     playMissSfx();
     return;
   }
@@ -2334,6 +2475,7 @@ function kickAt(clientX) {
   active.ball.hitPoint = active.hitPoint;
   active.ball.signedDiff = active.signedDiff;
   const timing = active.diff <= PERFECT_WINDOW ? "hard" : active.diff <= GOOD_WINDOW ? "good" : "ok";
+  showJudge(timing === "hard" ? "PERFECT" : timing === "good" ? "GREAT" : "GOOD", timing === "hard" ? 0xfff6cf : timing === "good" ? 0x41e7ff : 0xa9ff6e, active.signedDiff);
   state.hitStopTimer = HIT_STOP_SECONDS;
   sceneRef?.kicker.kick(timing, active.hitPoint);
   playKickImpactSfx(timing);
@@ -2542,6 +2684,20 @@ function popFeedback(text, color) {
   popFeedback.timer = window.setTimeout(() => feedback.classList.remove("is-on"), 230);
 }
 
+function showJudge(text, color, signedDiff = 0) {
+  state.lastJudge = {
+    text,
+    color,
+    signedDiff,
+    duration: 0.56,
+    until: state.beat + 0.56,
+  };
+}
+
+function cssColor(color) {
+  return `#${color.toString(16).padStart(6, "0")}`;
+}
+
 function togglePause() {
   if (state.mode === "playing") {
     pauseMusicClock();
@@ -2594,6 +2750,7 @@ function updateGame(dt) {
       sceneRef?.kicker.setState("missReact", { force: true });
       sceneRef.kicker.lockedUntilMs = sceneRef.time.now + 320;
       registerMiss();
+      showJudge("LATE", 0x92a9bc, HIT_WINDOW);
       popFeedback("MISS", "#92a9bc");
       playMissSfx();
     }
@@ -2628,6 +2785,22 @@ function strikeRing() {
     x: getWidth() * 0.5,
     y: getHeight() * 0.72,
     r: Math.min(getWidth() * 0.12, 54),
+  };
+}
+
+function rhythmGuideLayout() {
+  const ring = strikeRing();
+  const laneGap = Math.min(getWidth() * 0.22, 86);
+  const width = laneGap * 2 + 76;
+  const top = Math.max(getHeight() * 0.5, ring.y - Math.min(getHeight() * 0.27, 228));
+  return {
+    ring,
+    top,
+    hitY: ring.y,
+    width,
+    left: ring.x - width / 2,
+    right: ring.x + width / 2,
+    laneXs: [ring.x - laneGap, ring.x, ring.x + laneGap],
   };
 }
 
