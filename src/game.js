@@ -116,6 +116,11 @@ const aliens = [
     tempo: 0.86,
     scale: 1.02,
     spriteHeight: 84,
+    actionAssets: {
+      hardDirect: { key: "alien-slime-hard-direct", path: "assets/characters/alien-actions/slime-hard-direct-v1.png" },
+      cleanGoal: { key: "alien-slime-clean-goal", path: "assets/characters/alien-actions/slime-clean-goal-v1.png" },
+      blocked: { key: "alien-slime-blocked", path: "assets/characters/alien-actions/slime-blocked-v1.png" },
+    },
   },
   {
     type: "Mantis",
@@ -131,6 +136,11 @@ const aliens = [
     tempo: 0.78,
     scale: 1.08,
     spriteHeight: 126,
+    actionAssets: {
+      hardDirect: { key: "alien-mantis-hard-direct", path: "assets/characters/alien-actions/mantis-hard-direct-v1.png" },
+      cleanGoal: { key: "alien-mantis-clean-goal", path: "assets/characters/alien-actions/mantis-clean-goal-v1.png" },
+      blocked: { key: "alien-mantis-blocked", path: "assets/characters/alien-actions/mantis-blocked-v1.png" },
+    },
   },
   {
     type: "Psychic",
@@ -146,6 +156,11 @@ const aliens = [
     tempo: 0.7,
     scale: 1.12,
     spriteHeight: 112,
+    actionAssets: {
+      hardDirect: { key: "alien-psychic-hard-direct", path: "assets/characters/alien-actions/psychic-hard-direct-v1.png" },
+      cleanGoal: { key: "alien-psychic-clean-goal", path: "assets/characters/alien-actions/psychic-clean-goal-v1.png" },
+      blocked: { key: "alien-psychic-blocked", path: "assets/characters/alien-actions/psychic-blocked-v1.png" },
+    },
   },
 ];
 
@@ -203,6 +218,8 @@ let gameRef = null;
 const query = new URLSearchParams(window.location.search);
 const auditMode = query.get("audit") === "1";
 const autoTapMode = auditMode ? query.get("autotap") || "" : "";
+const auditForceGoal = auditMode && query.get("auditForceGoal") === "1";
+const auditAlienType = auditMode ? query.get("auditAlien") || "" : "";
 const rhythmAudit = auditMode ? createRhythmAudit() : null;
 if (rhythmAudit) window.__AKB_RHYTHM_AUDIT__ = rhythmAudit;
 if (rhythmAudit) document.documentElement.dataset.akbAudit = "1";
@@ -224,31 +241,60 @@ function createRhythmAudit() {
       const inputs = events.filter((event) => event.type === "input");
       const misses = events.filter((event) => event.type === "miss");
       const shots = events.filter((event) => event.type === "shot");
+      const visualOutcomes = events.filter((event) => event.type === "visual-outcome");
       const perfectInputs = inputs.filter((event) => event.timing === "hard");
+      const goodInputs = inputs.filter((event) => event.timing === "good");
       const diffs = inputs.map((event) => Math.abs(event.signedDiff || 0)).sort((a, b) => a - b);
       const medianDiff = diffs.length ? diffs[Math.floor(diffs.length / 2)] : null;
       const maxDiff = diffs.length ? diffs[diffs.length - 1] : null;
       const goals = shots.filter((event) => event.goal).length;
       const wrongLaneGoals = shots.filter((event) => !event.laneMatched && event.goal).length;
+      const visualCounts = visualOutcomes.reduce(
+        (counts, event) => {
+          counts[event.outcome] = (counts[event.outcome] || 0) + 1;
+          return counts;
+        },
+        { hardDirect: 0, cleanGoal: 0, blocked: 0 },
+      );
+      const lastVisual = visualOutcomes[visualOutcomes.length - 1] || null;
       const timingPass =
         inputs.length >= 32 &&
         perfectInputs.length / inputs.length >= 0.95 &&
         (medianDiff ?? Infinity) <= 0.01 &&
         (maxDiff ?? Infinity) <= 0.025 &&
         misses.length === 0;
+      const hardVisualPass = inputs.length >= 8 && visualCounts.hardDirect > 0 && perfectInputs.length / inputs.length >= 0.9 && misses.length === 0;
+      const goodVisualPass = inputs.length >= 8 && visualCounts.cleanGoal > 0 && goodInputs.length / inputs.length >= 0.85 && wrongLaneGoals === 0;
       const wrongLanePass = inputs.length >= 32 && goals === 0 && wrongLaneGoals === 0 && misses.length === 0;
+      const wrongLaneVisualPass = inputs.length >= 8 && visualCounts.blocked > 0 && goals === 0 && wrongLaneGoals === 0 && misses.length === 0;
+      const pass =
+        autoTapMode === "wrongLane"
+          ? wrongLanePass || wrongLaneVisualPass
+          : autoTapMode === "hard"
+            ? hardVisualPass
+            : autoTapMode === "good"
+              ? goodVisualPass
+              : timingPass;
       return {
         mode: autoTapMode || "manual",
+        auditForceGoal,
+        auditAlien: auditAlienType || "Slime",
         inputCount: inputs.length,
         perfectRate: inputs.length ? perfectInputs.length / inputs.length : 0,
+        goodRate: inputs.length ? goodInputs.length / inputs.length : 0,
         medianDiff,
         maxDiff,
         misses: misses.length,
         goals,
         wrongLaneGoals,
+        visualCounts,
+        lastVisual,
         timingPass,
+        hardVisualPass,
+        goodVisualPass,
         wrongLanePass,
-        pass: autoTapMode === "wrongLane" ? wrongLanePass : timingPass,
+        wrongLaneVisualPass,
+        pass,
       };
     },
   };
@@ -257,12 +303,24 @@ function createRhythmAudit() {
 function recordRhythmAudit(type, data = {}) {
   if (!rhythmAudit) return;
   rhythmAudit.record(type, data);
+  const summary = rhythmAudit.summary();
   document.documentElement.dataset.akbAuditEventCount = String(rhythmAudit.events.length);
-  document.documentElement.dataset.akbAuditSummary = JSON.stringify(rhythmAudit.summary());
+  document.documentElement.dataset.akbAuditSummary = JSON.stringify(summary);
+  if (summary.lastVisual) {
+    document.documentElement.dataset.akbLastOutcome = summary.lastVisual.outcome;
+    document.documentElement.dataset.akbLastAlien = summary.lastVisual.alien;
+  }
+  document.documentElement.dataset.akbVisualSummary = JSON.stringify(summary.visualCounts);
 }
 
 function roundTime(value) {
   return Math.round(value * 1000000) / 1000000;
+}
+
+function initialAlienIndex() {
+  if (!auditAlienType) return 0;
+  const index = aliens.findIndex((alien) => alien.type.toLowerCase() === auditAlienType.toLowerCase());
+  return index >= 0 ? index : 0;
 }
 
 class CharacterAnimator {
@@ -555,7 +613,7 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.sprite = scene.add.image(0, 0, alien.assetKey);
     this.sprite.setOrigin(0.5, alien.type === "Mantis" ? 0.84 : alien.type === "Psychic" ? 0.72 : 0.62);
     this.sprite.setAlpha(0.98);
-    this.actionSprite = scene.add.image(0, 0, "alien-block");
+    this.actionSprite = scene.add.image(0, 0, alien.actionAssets?.blocked?.key || "alien-block");
     this.actionSprite.setOrigin(0.5, 0.56);
     this.actionSprite.setVisible(false);
     this.body = scene.add.graphics();
@@ -569,7 +627,7 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.saveLane = 1;
     this.laneMatched = true;
     this.actionUntilMs = 0;
-    this.actionKind = "block";
+    this.actionKind = "blocked";
   }
 
   setAlien(alien) {
@@ -579,6 +637,8 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.laneMatched = true;
     this.sprite.setTexture(alien.assetKey);
     this.sprite.setOrigin(0.5, alien.type === "Mantis" ? 0.84 : alien.type === "Psychic" ? 0.72 : 0.62);
+    this.actionSprite.setTexture(this.actionTextureKey("blocked"));
+    this.actionSprite.setVisible(false);
     this.introPose();
   }
 
@@ -611,17 +671,18 @@ class AlienKeeperAnimator extends CharacterAnimator {
     });
   }
 
-  playSave(goal, aimLane, timing, laneMatched = true) {
-    this.saveLane = aimLane;
+  playSave(outcome, aimLane, timing, laneMatched = true) {
+    const goal = outcome === "hardDirect" || outcome === "cleanGoal";
+    this.saveLane = outcome === "cleanGoal" ? (aimLane === 0 ? 2 : 0) : aimLane;
     this.laneMatched = laneMatched;
     this.expression = goal ? "fail" : "save";
     this.expressionUntil = state.beat + (goal ? 0.7 : laneMatched ? 0.52 : 0.76);
     this.setState(goal ? "saveFail" : "saveSuccess", { force: true, timing });
-    if (!goal) this.showAction("block", laneMatched ? 320 : 420);
+    this.showAction(outcome, outcome === "hardDirect" ? 560 : outcome === "cleanGoal" ? 480 : laneMatched ? 380 : 460);
     const readBoost = laneMatched ? 1 : 1.55;
     this.scene.tweens.add({
       targets: this.container,
-      x: this.container.x + (aimLane - 1) * (goal ? 7 : 18 * readBoost),
+      x: this.container.x + (this.saveLane - 1) * (goal ? 12 : 18 * readBoost),
       duration: laneMatched ? 85 : 70,
       yoyo: true,
       ease: "Quad.Out",
@@ -667,32 +728,42 @@ class AlienKeeperAnimator extends CharacterAnimator {
     this.drawExpressionMarks(pose, alien);
   }
 
+  actionTextureKey(kind) {
+    if (this.alien.actionAssets?.[kind]?.key) return this.alien.actionAssets[kind].key;
+    if (kind === "hardDirect") return "alien-hardhit";
+    return "alien-block";
+  }
+
   showAction(kind, durationMs = 280) {
     this.actionKind = kind;
     this.actionUntilMs = Math.max(this.actionUntilMs, this.scene.time.now + durationMs);
-    this.actionSprite.setTexture(kind === "hardhit" ? "alien-hardhit" : "alien-block");
-    this.actionSprite.setAlpha(kind === "hardhit" ? 1 : 0.96);
+    this.actionSprite.setTexture(this.actionTextureKey(kind));
+    this.actionSprite.setAlpha(kind === "hardDirect" ? 1 : 0.96);
     this.actionSprite.clearTint();
-    this.actionSprite.setScale(this.laneMatched === false && kind === "block" ? 0.95 : 0.82);
-    if (this.laneMatched === false && kind === "block") this.actionSprite.setTint(0xfff6cf);
+    this.actionSprite.setScale(this.laneMatched === false && kind === "blocked" ? 0.95 : 0.82);
+    if (this.laneMatched === false && kind === "blocked") this.actionSprite.setTint(0xfff6cf);
     this.scene.tweens.add({
       targets: this.actionSprite,
-      scaleX: kind === "hardhit" ? 0.98 : this.laneMatched === false ? 1.06 : 0.9,
-      scaleY: kind === "hardhit" ? 0.98 : this.laneMatched === false ? 1.06 : 0.9,
+      scaleX: kind === "hardDirect" ? 1.02 : this.laneMatched === false ? 1.06 : 0.92,
+      scaleY: kind === "hardDirect" ? 1.02 : this.laneMatched === false ? 1.06 : 0.92,
       duration: 110,
       ease: "Back.Out",
     });
   }
 
   drawActionSprite(pose, alien) {
-    const hardhit = this.actionKind === "hardhit";
-    const readBlock = this.laneMatched === false && !hardhit;
-    const height = Math.min(getWidth() * (hardhit ? 0.43 : readBlock ? 0.44 : 0.38), hardhit ? 164 : readBlock ? 168 : 146);
+    const hardDirect = this.actionKind === "hardDirect";
+    const cleanGoal = this.actionKind === "cleanGoal";
+    const readBlock = this.laneMatched === false && this.actionKind === "blocked";
+    const height = Math.min(getWidth() * (hardDirect ? 0.48 : cleanGoal ? 0.45 : readBlock ? 0.44 : 0.4), hardDirect ? 184 : cleanGoal ? 174 : readBlock ? 168 : 154);
     this.actionSprite.setDisplaySize(height, height);
-    this.actionSprite.setPosition((this.saveLane - 1) * (hardhit ? 7 : readBlock ? 24 : 16), hardhit ? -8 : readBlock ? -9 : -3);
-    this.actionSprite.setAngle((this.saveLane - 1) * (hardhit ? -8 : readBlock ? 12 : 7) + Math.sin(state.beat * 14) * 1.6);
-    this.fx.lineStyle(hardhit ? 5 : readBlock ? 4 : 3, hardhit ? 0xffd166 : readBlock ? 0xfff6cf : alien.accent, hardhit ? 0.55 : readBlock ? 0.48 : 0.28);
-    this.fx.strokeCircle(0, 0, pose.s * (hardhit ? 1.48 : readBlock ? 1.38 : 1.18));
+    this.actionSprite.setPosition(
+      (this.saveLane - 1) * (hardDirect ? 8 : cleanGoal ? 26 : readBlock ? 24 : 16),
+      hardDirect ? -10 : cleanGoal ? -13 : readBlock ? -9 : -4,
+    );
+    this.actionSprite.setAngle((this.saveLane - 1) * (hardDirect ? -7 : cleanGoal ? 11 : readBlock ? 12 : 7) + Math.sin(state.beat * 14) * 1.6);
+    this.fx.lineStyle(hardDirect ? 6 : cleanGoal ? 4 : readBlock ? 4 : 3, hardDirect ? 0xffd166 : cleanGoal ? 0x41e7ff : readBlock ? 0xfff6cf : alien.accent, hardDirect ? 0.62 : cleanGoal ? 0.34 : readBlock ? 0.48 : 0.28);
+    this.fx.strokeCircle(0, 0, pose.s * (hardDirect ? 1.56 : cleanGoal ? 1.28 : readBlock ? 1.38 : 1.18));
   }
 
   drawSlimeSprite(pose, down, baseWidth, baseHeight) {
@@ -878,18 +949,19 @@ class AlienKeeperAnimator extends CharacterAnimator {
     }
   }
 
-  emitContactEffect(x, y, goal, timing) {
-    if (!goal && timing === "hard") this.showAction("hardhit", 360);
-    if (this.alien.type === "Slime") this.emitSlimeSplash(x, y, goal, timing);
-    if (this.alien.type === "Mantis") this.emitMantisSlash(x, y, goal, timing);
-    if (this.alien.type === "Psychic") this.emitPsychicPulse(x, y, goal, timing);
+  emitContactEffect(x, y, outcome, timing) {
+    if (outcome === "cleanGoal") return;
+    if (this.alien.type === "Slime") this.emitSlimeSplash(x, y, outcome, timing);
+    if (this.alien.type === "Mantis") this.emitMantisSlash(x, y, outcome, timing);
+    if (this.alien.type === "Psychic") this.emitPsychicPulse(x, y, outcome, timing);
   }
 
-  emitSlimeSplash(x, y, goal, timing) {
-    const count = goal ? 12 : 22;
+  emitSlimeSplash(x, y, outcome, timing) {
+    const hardDirect = outcome === "hardDirect";
+    const count = hardDirect ? 30 : 22;
     for (let i = 0; i < count; i += 1) {
       const angle = Math.random() * Math.PI * 2;
-      const speed = 80 + Math.random() * (goal ? 130 : 260);
+      const speed = 90 + Math.random() * (hardDirect ? 310 : 230);
       this.scene.createParticle({
         x,
         y,
@@ -902,9 +974,10 @@ class AlienKeeperAnimator extends CharacterAnimator {
     }
   }
 
-  emitMantisSlash(x, y, goal, timing) {
+  emitMantisSlash(x, y, outcome, timing) {
+    const hardDirect = outcome === "hardDirect";
     const slash = this.scene.add.graphics();
-    slash.lineStyle(timing === "hard" ? 8 : 5, goal ? 0xff4f79 : this.alien.accent, 0.88);
+    slash.lineStyle(timing === "hard" ? 8 : 5, hardDirect ? 0xff4f79 : this.alien.accent, 0.88);
     for (let i = 0; i < 3; i += 1) {
       slash.beginPath();
       slash.moveTo(x - 62 + i * 18, y + 34 - i * 12);
@@ -921,9 +994,10 @@ class AlienKeeperAnimator extends CharacterAnimator {
     });
   }
 
-  emitPsychicPulse(x, y, goal, timing) {
+  emitPsychicPulse(x, y, outcome, timing) {
+    const hardDirect = outcome === "hardDirect";
     for (let i = 0; i < 4; i += 1) {
-      const ring = this.scene.add.circle(x, y, 18 + i * 8, goal ? 0xff4f79 : this.alien.accent, 0);
+      const ring = this.scene.add.circle(x, y, 18 + i * 8, hardDirect ? 0xff4f79 : this.alien.accent, 0);
       ring.setStrokeStyle(timing === "hard" ? 5 : 3, i % 2 ? this.alien.accent : 0xffffff, 0.74);
       this.scene.tweens.add({
         targets: ring,
@@ -962,6 +1036,11 @@ class KickScene extends Phaser.Scene {
     this.load.image("alien-psychic", "assets/characters/psychic.png");
     this.load.image("alien-block", "assets/characters/alien-block.png");
     this.load.image("alien-hardhit", "assets/characters/alien-hardhit.png");
+    for (const alien of aliens) {
+      for (const action of Object.values(alien.actionAssets || {})) {
+        this.load.image(action.key, action.path);
+      }
+    }
   }
 
   create() {
@@ -1250,8 +1329,17 @@ class KickScene extends Phaser.Scene {
 
   updateShots() {
     for (const shot of this.shots) {
-      const t = Phaser.Math.Clamp((state.beat - shot.born) / shot.duration, 0, 1);
-      const p = shotPosition(shot, easeOutCubic(t));
+      const elapsed = state.beat - shot.born;
+      const t = Phaser.Math.Clamp(elapsed / shot.duration, 0, 1);
+      if (!shot.impactTriggered && elapsed >= shot.impactTime) {
+        shot.impactTriggered = true;
+        handleShotImpact(shot);
+      }
+      if (!shot.finishTriggered && elapsed >= shot.duration) {
+        shot.finishTriggered = true;
+        handleShotFinish(shot);
+      }
+      const p = shotPosition(shot, t);
       shot.sprite.setPosition(p.x, p.y);
       shot.sprite.setScale(p.r / 24);
       shot.sprite.rotation = shot.spin + state.beat * (shot.hard ? 18 : 13);
@@ -1391,6 +1479,8 @@ class KickScene extends Phaser.Scene {
 
 function resetGame() {
   state.mode = "playing";
+  document.documentElement.dataset.akbGameState = "playing";
+  document.documentElement.dataset.akbGameClear = "0";
   state.timeLeft = ROUND_SECONDS;
   state.score = 0;
   state.combo = 0;
@@ -1403,8 +1493,8 @@ function resetGame() {
   state.autoTapDone = new Set();
   resetRhythmSequencer();
   startMusicClock();
-  state.alienIndex = 0;
-  state.alienHp = aliens[0].hp;
+  state.alienIndex = initialAlienIndex();
+  state.alienHp = aliens[state.alienIndex].hp;
   state.alienDownUntil = 0;
   state.alienSwapTimer = 0;
   state.finalWinTimer = 0;
@@ -2638,8 +2728,10 @@ function resolveShot(ball, timing) {
   const blockChance = laneMatched
     ? Phaser.Math.Clamp(alien.block - 0.1 - (down ? 0.3 : 0) - timingBonus, 0.03, 0.68)
     : 0.98;
-  const goal = laneMatched && Math.random() > blockChance;
-  const shot = createShot(ball, timing, goal, shotLane);
+  const forcedGoal = auditForceGoal && laneMatched && autoTapMode !== "wrongLane";
+  const goal = laneMatched && (forcedGoal || Math.random() > blockChance);
+  const outcome = !laneMatched || !goal ? "blocked" : timing === "hard" ? "hardDirect" : "cleanGoal";
+  const shot = createShot(ball, timing, goal, shotLane, outcome);
   recordRhythmAudit("shot", {
     id: ball.id,
     lane: ball.lane,
@@ -2647,10 +2739,21 @@ function resolveShot(ball, timing) {
     laneMatched,
     timing,
     goal,
+    outcome,
+    forcedGoal,
     blockChance: roundTime(blockChance),
   });
-  sceneRef?.alienVisual.playSave(goal, shotLane, timing, laneMatched);
-  sceneRef?.alienVisual.emitContactEffect(shot.contactX, shot.contactY, goal, timing);
+  recordRhythmAudit("visual-outcome", {
+    id: ball.id,
+    alien: alien.type,
+    outcome,
+    timing,
+    lane: ball.lane,
+    shotLane,
+    laneMatched,
+    goal,
+  });
+  sceneRef?.alienVisual.playSave(outcome, shotLane, timing, laneMatched);
   sceneRef?.kicker.react(goal);
 
   if (goal) {
@@ -2660,17 +2763,9 @@ function resolveShot(ball, timing) {
     state.maxCombo = Math.max(state.maxCombo, state.combo);
     updateComboMusicTier();
     popFeedback(timing === "hard" ? "HARD HIT!" : timing === "good" ? "NICE!" : "GOAL", timing === "hard" ? "#ffd166" : "#41e7ff");
-    sceneRef.flash.alpha = timing === "hard" ? 0.28 : 0.12;
-    sceneRef.cameras.main.shake(timing === "hard" ? 180 : 110, timing === "hard" ? 0.012 : 0.006);
-    playGoalSfx(timing);
-    emitShotParticles(ball, timing, true);
-    emitGoalBurst(timing, shotLane);
   } else {
     registerMiss();
     popFeedback(laneMatched ? "BLOCKED" : "WRONG LANE", laneMatched ? `#${alien.color.toString(16).padStart(6, "0")}` : "#ff4f79");
-    sceneRef.cameras.main.shake(120, 0.008);
-    playBlockSfx(timing);
-    emitShotParticles(ball, timing, false);
   }
 
   if (state.combo >= 4 && timing !== "ok") {
@@ -2682,37 +2777,85 @@ function resolveShot(ball, timing) {
   syncHud();
 }
 
-function createShot(ball, timing, goal, aimLane) {
+function createShot(ball, timing, goal, aimLane, outcome) {
   const start = ball.hitPoint || ballPosition(ball);
   const goalBox = getGoalBox();
   const alien = getAlienPose();
   const laneX = goalBox.x + goalBox.w * (0.22 + aimLane * 0.28);
-  const target = goal
-    ? {
-        x: laneX + (Math.random() - 0.5) * goalBox.w * 0.16,
-        y: goalBox.y + goalBox.h * (timing === "hard" ? 0.32 : 0.46),
-      }
-    : {
-        x: alien.x + (aimLane - 1) * getWidth() * 0.045,
-        y: alien.y - alien.s * 0.1,
-      };
+  const goalTarget = {
+    x: laneX + (Math.random() - 0.5) * goalBox.w * 0.16,
+    y: goalBox.y + goalBox.h * (timing === "hard" ? 0.32 : 0.46),
+  };
+  const contact = {
+    x: alien.x + (aimLane - 1) * alien.s * 0.62,
+    y: alien.y - alien.s * 0.08,
+  };
+  const target = goal ? goalTarget : contact;
+  const hardDirect = outcome === "hardDirect";
+  const duration = hardDirect ? 0.66 : goal ? (timing === "hard" ? 0.42 : 0.5) : 0.42;
+  const viaT = 0.46;
   const shot = {
     startX: start.x,
     startY: start.y,
     targetX: target.x,
     targetY: target.y,
-    controlX: (start.x + target.x) / 2 + (aimLane - 1) * getWidth() * 0.08,
-    controlY: Math.min(start.y, target.y) - getHeight() * (timing === "hard" ? 0.22 : 0.16),
+    controlX: (start.x + (hardDirect ? contact.x : target.x)) / 2 + (aimLane - 1) * getWidth() * 0.08,
+    controlY: Math.min(start.y, hardDirect ? contact.y : target.y) - getHeight() * (timing === "hard" ? 0.22 : 0.16),
+    control2X: (contact.x + goalTarget.x) / 2 - (aimLane - 1) * getWidth() * 0.035,
+    control2Y: Math.min(contact.y, goalTarget.y) - getHeight() * 0.11,
+    viaX: hardDirect ? contact.x : null,
+    viaY: hardDirect ? contact.y : null,
+    viaT,
     born: state.beat,
-    duration: timing === "hard" ? 0.42 : 0.5,
+    duration,
+    impactTime: hardDirect ? duration * viaT : outcome === "blocked" ? duration * 0.86 : duration + 1,
     spin: ball.spin,
     hard: timing === "hard",
     goal,
-    contactX: goal ? target.x : alien.x + (aimLane - 1) * alien.s * 0.6,
-    contactY: goal ? target.y : alien.y - alien.s * 0.1,
+    timing,
+    outcome,
+    aimLane,
+    laneMatched: ball.laneMatched,
+    contactX: contact.x,
+    contactY: contact.y,
+    goalX: goalTarget.x,
+    goalY: goalTarget.y,
+    impactTriggered: false,
+    finishTriggered: false,
   };
   sceneRef?.createShot(shot);
   return shot;
+}
+
+function handleShotImpact(shot) {
+  if (!sceneRef || shot.outcome === "cleanGoal") return;
+  sceneRef.alienVisual.emitContactEffect(shot.contactX, shot.contactY, shot.outcome, shot.timing);
+  recordRhythmAudit("visual-impact", {
+    outcome: shot.outcome,
+    alien: aliens[state.alienIndex].type,
+    x: Math.round(shot.contactX),
+    y: Math.round(shot.contactY),
+    timing: shot.timing,
+    laneMatched: shot.laneMatched,
+  });
+  sceneRef.flash.alpha = shot.outcome === "hardDirect" ? 0.32 : 0.18;
+  sceneRef.cameras.main.shake(shot.outcome === "hardDirect" ? 180 : 120, shot.outcome === "hardDirect" ? 0.013 : 0.008);
+  playBlockSfx(shot.timing);
+  emitShotParticles({ hitPoint: { x: shot.contactX, y: shot.contactY } }, shot.timing, false);
+}
+
+function handleShotFinish(shot) {
+  if (!sceneRef || !shot.goal) return;
+  recordRhythmAudit("visual-goal", {
+    outcome: shot.outcome,
+    alien: aliens[state.alienIndex].type,
+    x: Math.round(shot.goalX),
+    y: Math.round(shot.goalY),
+    timing: shot.timing,
+  });
+  playGoalSfx(shot.timing);
+  emitShotParticles({ hitPoint: { x: shot.goalX, y: shot.goalY } }, shot.timing, true);
+  emitGoalBurst(shot.timing, shot.aimLane);
 }
 
 function knockDownAlien() {
@@ -2749,10 +2892,12 @@ function registerMiss() {
 function updateAuditAutotap() {
   if (!autoTapMode || state.mode !== "playing" || !sceneRef) return;
   const inputSongTime = getInputSongTime();
+  const desiredLate = autoTapMode === "good" ? PERFECT_WINDOW + 0.012 : 0;
   const target = sceneRef.balls
     .filter((ball) => !ball.hit && !ball.missed && !state.autoTapDone.has(ball.id))
-    .map((ball) => ({ ball, diff: inputSongTime - ball.hitTime }))
-    .filter((entry) => entry.diff >= 0 && entry.diff <= HIT_WINDOW)
+    .map((ball) => ({ ball, signedDiff: inputSongTime - ball.hitTime }))
+    .filter((entry) => entry.signedDiff >= desiredLate && entry.signedDiff <= HIT_WINDOW)
+    .map((entry) => ({ ...entry, diff: Math.abs(entry.signedDiff - desiredLate) }))
     .sort((a, b) => a.diff - b.diff)[0];
   if (!target) return;
 
@@ -2764,7 +2909,8 @@ function updateAuditAutotap() {
     mode: autoTapMode,
     lane,
     noteLane: target.ball.lane,
-    triggerDiff: roundTime(target.diff),
+    desiredLate: roundTime(desiredLate),
+    triggerDiff: roundTime(target.signedDiff),
   });
   kickAt(guide.laneXs[lane]);
 }
@@ -2889,6 +3035,14 @@ function togglePause() {
 function endGame(win) {
   if (state.mode !== "playing") return;
   state.mode = win ? "win" : "lose";
+  document.documentElement.dataset.akbGameState = state.mode;
+  document.documentElement.dataset.akbGameClear = win ? "1" : "0";
+  recordRhythmAudit("end", {
+    win,
+    score: state.score,
+    maxCombo: state.maxCombo,
+    alienIndex: state.alienIndex,
+  });
   if (win) playWinFanfare();
   else playLoseStinger();
   const copy = win
@@ -3025,9 +3179,27 @@ function ballPositionAt(ball, songTime) {
 }
 
 function shotPosition(shot, t) {
-  const x = quadratic(shot.startX, shot.controlX, shot.targetX, t);
-  const y = quadratic(shot.startY, shot.controlY, shot.targetY, t);
-  const scale = shot.goal ? lerp(1.05, 0.55, t) : lerp(1, 0.82, t);
+  if (Number.isFinite(shot.viaX) && Number.isFinite(shot.viaY)) {
+    const viaT = shot.viaT || 0.48;
+    if (t <= viaT) {
+      const phase = easeOutCubic(t / viaT);
+      return {
+        x: quadratic(shot.startX, shot.controlX, shot.viaX, phase),
+        y: quadratic(shot.startY, shot.controlY, shot.viaY, phase),
+        r: Math.min(getWidth() * 0.065, 24) * lerp(1.08, 0.88, phase),
+      };
+    }
+    const phase = easeOutCubic((t - viaT) / (1 - viaT));
+    return {
+      x: quadratic(shot.viaX, shot.control2X, shot.targetX, phase),
+      y: quadratic(shot.viaY, shot.control2Y, shot.targetY, phase),
+      r: Math.min(getWidth() * 0.065, 24) * lerp(0.88, 0.5, phase),
+    };
+  }
+  const eased = easeOutCubic(t);
+  const x = quadratic(shot.startX, shot.controlX, shot.targetX, eased);
+  const y = quadratic(shot.startY, shot.controlY, shot.targetY, eased);
+  const scale = shot.goal ? lerp(1.05, 0.55, eased) : lerp(1, 0.82, eased);
   return {
     x,
     y,
