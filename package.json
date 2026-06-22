@@ -5,6 +5,7 @@
   "type": "module",
   "scripts": {
     "dev": "node tools/serve.mjs",
-    "check": "node --check src/game.js && node --check tools/serve.mjs && node --check sw.js"
+    "check": "node --check src/rhythm-data.js && node --check src/game.js && node --check tools/serve.mjs && node --check tools/rhythm-audit.mjs && node --check sw.js",
+    "rhythm:audit": "node tools/rhythm-audit.mjs"
   }
 }

@@ -1,3 +1,21 @@
+import {
+  BALL_LIFE,
+  BEAT_SECONDS,
+  CALIBRATED_INPUT_OFFSET_SECONDS,
+  FIRST_HIT_BEAT,
+  GOOD_WINDOW,
+  HIT_WINDOW,
+  MUSIC_BPM,
+  MUSIC_STEP_SECONDS,
+  NOTE_HIGHWAY_PREVIEW_SECONDS,
+  PERFECT_WINDOW,
+  RHYTHM_PATTERN_BEATS,
+  collectRhythmTimeline,
+  getRhythmHitAtMusicBeat,
+  makeRhythmCue,
+  rhythmPatterns,
+} from "./rhythm-data.js";
+
 const scoreEl = document.querySelector("#score");
 const timeEl = document.querySelector("#time");
 const comboEl = document.querySelector("#combo");
@@ -11,22 +29,10 @@ const pauseButton = document.querySelector("#pauseButton");
 const feedback = document.querySelector("#feedback");
 
 const ROUND_SECONDS = 90;
-const MUSIC_BPM = 126;
-const BEAT_SECONDS = 60 / MUSIC_BPM;
-const BALL_LIFE_BEATS = 2.5;
-const BALL_LIFE = BEAT_SECONDS * BALL_LIFE_BEATS;
-const HIT_WINDOW = 0.2;
-const PERFECT_WINDOW = 0.07;
-const GOOD_WINDOW = 0.125;
 const HIT_STOP_SECONDS = 0.08;
-const INPUT_JUDGEMENT_OFFSET_SECONDS = 0.018;
 const MIN_AUDIO_LATENCY_COMPENSATION = 0.018;
 const MAX_AUDIO_LATENCY_COMPENSATION = 0.085;
-const MUSIC_STEP_SECONDS = BEAT_SECONDS / 4;
 const MUSIC_LOOKAHEAD_SECONDS = 0.18;
-const NOTE_HIGHWAY_PREVIEW_SECONDS = BEAT_SECONDS * 4;
-const RHYTHM_PATTERN_BEATS = 8;
-const FIRST_HIT_BEAT = 4;
 const MAIN_GAIN = 0.82;
 const MUSIC_GAIN = 0.5;
 const SFX_GAIN = 0.72;
@@ -95,61 +101,6 @@ const alienMusicProfiles = {
   },
 };
 
-const rhythmPatterns = [
-  {
-    name: "FOUR KICK",
-    hits: [
-      { beat: 0, lane: 1, side: -1, accent: true },
-      { beat: 1, lane: 0, side: 1 },
-      { beat: 2, lane: 2, side: -1 },
-      { beat: 3, lane: 1, side: 1 },
-      { beat: 4, lane: 0, side: -1, accent: true },
-      { beat: 5, lane: 2, side: 1 },
-      { beat: 6, lane: 1, side: -1 },
-      { beat: 7, lane: 2, side: 1 },
-    ],
-  },
-  {
-    name: "SYNCOPATE",
-    hits: [
-      { beat: 0, lane: 1, side: -1, accent: true },
-      { beat: 0.75, lane: 2, side: 1 },
-      { beat: 1.5, lane: 0, side: -1 },
-      { beat: 2.75, lane: 1, side: 1, accent: true },
-      { beat: 4, lane: 2, side: -1 },
-      { beat: 5.25, lane: 0, side: 1 },
-      { beat: 6, lane: 1, side: -1 },
-      { beat: 7.25, lane: 2, side: 1 },
-    ],
-  },
-  {
-    name: "DOUBLE TAP",
-    hits: [
-      { beat: 0, lane: 0, side: -1, accent: true },
-      { beat: 0.5, lane: 1, side: 1 },
-      { beat: 2, lane: 2, side: -1, accent: true },
-      { beat: 2.5, lane: 1, side: 1 },
-      { beat: 4, lane: 1, side: -1 },
-      { beat: 5, lane: 0, side: 1 },
-      { beat: 6, lane: 2, side: -1 },
-      { beat: 6.5, lane: 1, side: 1 },
-    ],
-  },
-  {
-    name: "BREAK BEAT",
-    hits: [
-      { beat: 0, lane: 2, side: 1, accent: true },
-      { beat: 1.5, lane: 0, side: -1 },
-      { beat: 2.25, lane: 1, side: 1 },
-      { beat: 3.5, lane: 2, side: -1 },
-      { beat: 4, lane: 0, side: 1, accent: true },
-      { beat: 4.75, lane: 1, side: -1 },
-      { beat: 6.25, lane: 2, side: 1 },
-      { beat: 7, lane: 0, side: -1 },
-    ],
-  },
-];
-
 const aliens = [
   {
     type: "Slime",
@@ -205,6 +156,8 @@ const state = {
   combo: 0,
   maxCombo: 0,
   beat: 0,
+  songTimeSeconds: 0,
+  musicBeat: 0,
   nextSpawn: 0.3,
   patternIndex: 0,
   patternStartBeat: FIRST_HIT_BEAT,
@@ -242,10 +195,75 @@ const state = {
   duckDepth: 0,
   duckDuration: 0,
   lastJudge: null,
+  autoTapDone: new Set(),
 };
 
 let sceneRef = null;
 let gameRef = null;
+const query = new URLSearchParams(window.location.search);
+const auditMode = query.get("audit") === "1";
+const autoTapMode = auditMode ? query.get("autotap") || "" : "";
+const rhythmAudit = auditMode ? createRhythmAudit() : null;
+if (rhythmAudit) window.__AKB_RHYTHM_AUDIT__ = rhythmAudit;
+if (rhythmAudit) document.documentElement.dataset.akbAudit = "1";
+
+function createRhythmAudit() {
+  const events = [];
+  const add = (type, data = {}) => {
+    events.push({
+      type,
+      atMs: Math.round(performance.now() * 1000) / 1000,
+      songTime: typeof state?.beat === "number" ? roundTime(state.beat) : 0,
+      ...data,
+    });
+  };
+  return {
+    events,
+    record: add,
+    summary() {
+      const inputs = events.filter((event) => event.type === "input");
+      const misses = events.filter((event) => event.type === "miss");
+      const shots = events.filter((event) => event.type === "shot");
+      const perfectInputs = inputs.filter((event) => event.timing === "hard");
+      const diffs = inputs.map((event) => Math.abs(event.signedDiff || 0)).sort((a, b) => a - b);
+      const medianDiff = diffs.length ? diffs[Math.floor(diffs.length / 2)] : null;
+      const maxDiff = diffs.length ? diffs[diffs.length - 1] : null;
+      const goals = shots.filter((event) => event.goal).length;
+      const wrongLaneGoals = shots.filter((event) => !event.laneMatched && event.goal).length;
+      const timingPass =
+        inputs.length >= 32 &&
+        perfectInputs.length / inputs.length >= 0.95 &&
+        (medianDiff ?? Infinity) <= 0.01 &&
+        (maxDiff ?? Infinity) <= 0.025 &&
+        misses.length === 0;
+      const wrongLanePass = inputs.length >= 32 && goals === 0 && wrongLaneGoals === 0 && misses.length === 0;
+      return {
+        mode: autoTapMode || "manual",
+        inputCount: inputs.length,
+        perfectRate: inputs.length ? perfectInputs.length / inputs.length : 0,
+        medianDiff,
+        maxDiff,
+        misses: misses.length,
+        goals,
+        wrongLaneGoals,
+        timingPass,
+        wrongLanePass,
+        pass: autoTapMode === "wrongLane" ? wrongLanePass : timingPass,
+      };
+    },
+  };
+}
+
+function recordRhythmAudit(type, data = {}) {
+  if (!rhythmAudit) return;
+  rhythmAudit.record(type, data);
+  document.documentElement.dataset.akbAuditEventCount = String(rhythmAudit.events.length);
+  document.documentElement.dataset.akbAuditSummary = JSON.stringify(rhythmAudit.summary());
+}
+
+function roundTime(value) {
+  return Math.round(value * 1000000) / 1000000;
+}
 
 class CharacterAnimator {
   constructor(scene) {
@@ -985,6 +1003,11 @@ class KickScene extends Phaser.Scene {
     this.input.on("pointerdown", (pointer) => kickAt(pointer.x));
     this.layout();
     syncHud();
+    if (auditMode && query.get("autostart") !== "0") {
+      this.time.delayedCall(160, () => {
+        if (state.mode === "ready") start();
+      });
+    }
   }
 
   layout() {
@@ -1374,7 +1397,10 @@ function resetGame() {
   state.maxCombo = 0;
   state.lastComboTier = 0;
   state.beat = 0;
+  state.songTimeSeconds = 0;
+  state.musicBeat = 0;
   state.lastSongTime = 0;
+  state.autoTapDone = new Set();
   resetRhythmSequencer();
   startMusicClock();
   state.alienIndex = 0;
@@ -1396,6 +1422,7 @@ function resetGame() {
   }
   playStartFanfare();
   playAlienIntroSfx(aliens[state.alienIndex]);
+  recordRhythmAudit("start", { bpm: MUSIC_BPM, firstHitBeat: FIRST_HIT_BEAT, firstHitTime: FIRST_HIT_BEAT * BEAT_SECONDS });
   syncHud();
   message.hidden = true;
 }
@@ -1531,7 +1558,7 @@ function resumeMusicClock() {
 
 function getSongTime() {
   const audio = state.audio;
-  if (!audio || !state.audioReady) return state.beat;
+  if (!audio || !state.audioReady || audio.state !== "running") return state.beat;
   return Math.max(0, audio.currentTime - state.musicStartAt);
 }
 
@@ -1543,12 +1570,16 @@ function getAudioLatencyCompensation() {
   );
 }
 
-function getVisualSongTime() {
+function getAudibleSongTime() {
   return Math.max(0, getSongTime() - getAudioLatencyCompensation());
 }
 
+function getVisualSongTime() {
+  return getAudibleSongTime();
+}
+
 function getInputSongTime() {
-  return getVisualSongTime() + INPUT_JUDGEMENT_OFFSET_SECONDS;
+  return getAudibleSongTime() + CALIBRATED_INPUT_OFFSET_SECONDS;
 }
 
 function blip(freq, duration = 0.05, gain = 0.07, type = "sine") {
@@ -1673,16 +1704,11 @@ function resetRhythmSequencer() {
 }
 
 function queueNextRhythmCue() {
-  const pattern = rhythmPatterns[state.patternIndex];
-  const hit = pattern.hits[state.rhythmStep];
-  const hitBeat = state.patternStartBeat + hit.beat;
-  state.nextRhythmCue = {
-    ...hit,
-    patternName: pattern.name,
-    hitBeat,
-    hitTime: hitBeat * BEAT_SECONDS,
-    spawnTime: hitBeat * BEAT_SECONDS - BALL_LIFE,
-  };
+  state.nextRhythmCue = makeRhythmCue({
+    patternIndex: state.patternIndex,
+    rhythmStep: state.rhythmStep,
+    patternStartBeat: state.patternStartBeat,
+  });
 }
 
 function advanceRhythmCue() {
@@ -1741,6 +1767,7 @@ function scheduleMusicStep(stepIndex) {
   const hit = getRhythmHitAtMusicBeat(beat);
   const oneBeatCue = getRhythmHitAtMusicBeat(beat, 1);
   const halfBeatCue = getRhythmHitAtMusicBeat(beat, 0.5);
+  recordRhythmAudit("music-step", { stepIndex, songTime: roundTime(songTime), beat: roundTime(beat) });
 
   if ([0, 6, 10].includes(stepInBar) || (bar % 2 === 1 && stepInBar === 14)) {
     scheduleKickDrum(start, stepInBar === 0 ? 1 + energy * 0.08 : 0.72 + energy * 0.04);
@@ -1757,9 +1784,9 @@ function scheduleMusicStep(stepIndex) {
   scheduleAlienLayer(start, stepInBar, bar, chord, energy);
   scheduleComboGroove(start, stepInBar, energy);
   if (phraseBar === 15 && stepInBar >= 12) schedulePhraseLift(start, stepInBar, energy);
-  if (oneBeatCue) schedulePreTargetCue(start, oneBeatCue, 1, energy);
-  if (halfBeatCue) schedulePreTargetCue(start, halfBeatCue, 0.5, energy);
-  if (hit) scheduleTargetTick(start, hit);
+  if (oneBeatCue) schedulePreTargetCue(start, oneBeatCue, 1, energy, songTime);
+  if (halfBeatCue) schedulePreTargetCue(start, halfBeatCue, 0.5, energy, songTime);
+  if (hit) scheduleTargetTick(start, hit, songTime);
 }
 
 function getSongChord(bar) {
@@ -1792,44 +1819,29 @@ function getMusicDuck(songNow) {
   return state.duckDepth * amount;
 }
 
-function getRhythmHitAtMusicBeat(musicBeat, leadBeats = 0) {
-  const targetBeat = musicBeat + leadBeats;
-  if (targetBeat < FIRST_HIT_BEAT - 0.001) return null;
-  const patternCycle = Math.floor((targetBeat - FIRST_HIT_BEAT + 0.0001) / RHYTHM_PATTERN_BEATS);
-  const localBeat = targetBeat - FIRST_HIT_BEAT - patternCycle * RHYTHM_PATTERN_BEATS;
-  const pattern = rhythmPatterns[patternCycle % rhythmPatterns.length];
-  const hit = pattern.hits.find((entry) => Math.abs(entry.beat - localBeat) < 0.001);
-  return hit ? { ...hit, leadBeats, patternName: pattern.name } : null;
-}
-
 function collectRhythmGuideNotes(scene) {
   const notes = [];
   const nowMusicBeat = state.beat / BEAT_SECONDS;
   const previewBeats = NOTE_HIGHWAY_PREVIEW_SECONDS / BEAT_SECONDS;
-  const firstCycle = Math.max(0, Math.floor((nowMusicBeat - FIRST_HIT_BEAT - 0.001) / RHYTHM_PATTERN_BEATS));
   const lastMusicBeat = nowMusicBeat + previewBeats + 0.5;
-  const lastCycle = Math.max(firstCycle, Math.ceil((lastMusicBeat - FIRST_HIT_BEAT) / RHYTHM_PATTERN_BEATS) + 1);
+  const timeline = collectRhythmTimeline({
+    fromBeat: Math.max(FIRST_HIT_BEAT, nowMusicBeat - HIT_WINDOW / BEAT_SECONDS * 1.7),
+    toBeat: lastMusicBeat,
+  });
 
-  for (let cycle = firstCycle; cycle <= lastCycle; cycle += 1) {
-    const pattern = rhythmPatterns[cycle % rhythmPatterns.length];
-    for (const hit of pattern.hits) {
-      const hitMusicBeat = FIRST_HIT_BEAT + cycle * RHYTHM_PATTERN_BEATS + hit.beat;
-      const hitTime = hitMusicBeat * BEAT_SECONDS;
-      const timeToHit = hitTime - state.beat;
-      if (timeToHit > NOTE_HIGHWAY_PREVIEW_SECONDS + 0.05 || timeToHit < -HIT_WINDOW * 1.6) continue;
-      const ball = scene?.balls.find(
-        (entry) => Math.abs(entry.hitTime - hitTime) < 0.012 && entry.lane === hit.lane && entry.side === hit.side,
-      );
-      if (ball?.hit || ball?.missed) continue;
-      notes.push({
-        ...hit,
-        patternName: pattern.name,
-        hitTime,
-        timeToHit,
-        spawned: Boolean(ball),
-        ball,
-      });
-    }
+  for (const hit of timeline) {
+    const timeToHit = hit.hitTime - state.beat;
+    if (timeToHit > NOTE_HIGHWAY_PREVIEW_SECONDS + 0.05 || timeToHit < -HIT_WINDOW * 1.6) continue;
+    const ball = scene?.balls.find(
+      (entry) => Math.abs(entry.hitTime - hit.hitTime) < 0.012 && entry.lane === hit.lane && entry.side === hit.side,
+    );
+    if (ball?.hit || ball?.missed) continue;
+    notes.push({
+      ...hit,
+      timeToHit,
+      spawned: Boolean(ball),
+      ball,
+    });
   }
 
   return notes.sort((a, b) => b.timeToHit - a.timeToHit);
@@ -2119,49 +2131,87 @@ function schedulePhraseLift(start, stepInBar, energy) {
   });
 }
 
-function schedulePreTargetCue(start, hit, leadBeats, energy) {
+function schedulePreTargetCue(start, hit, leadBeats, energy, cueSongTime = hit.hitTime - leadBeats * BEAT_SECONDS) {
   const pan = (hit.lane - 1) * 0.36;
   const laneNotes = [NOTE.C5, NOTE.E5, NOTE.G5];
+  const closeCue = leadBeats < 1;
   const freq = laneNotes[hit.lane] * (leadBeats >= 1 ? 0.5 : 1);
+  recordRhythmAudit("pre-cue", {
+    lane: hit.lane,
+    leadBeats,
+    cueTime: roundTime(cueSongTime),
+    hitTime: roundTime(hit.hitTime),
+    diff: roundTime(cueSongTime - (hit.hitTime - leadBeats * BEAT_SECONDS)),
+  });
   scheduleTone({
     freq,
     start,
-    duration: leadBeats >= 1 ? 0.065 : 0.078,
-    gain: (leadBeats >= 1 ? 0.03 : 0.048) + energy * 0.004,
-    type: leadBeats >= 1 ? "sine" : "triangle",
+    duration: leadBeats >= 1 ? 0.07 : 0.095,
+    gain: (leadBeats >= 1 ? 0.044 : 0.072) + energy * 0.006,
+    type: closeCue ? "triangle" : "sine",
     bus: state.rhythmGain,
     attack: 0.002,
-    release: 0.045,
+    release: 0.055,
     filterType: "highpass",
-    filterFreq: 980 + energy * 220,
+    filterFreq: closeCue ? 1500 + energy * 260 : 980 + energy * 220,
     pan,
-    send: leadBeats >= 1 ? 0.14 : 0.2,
+    send: leadBeats >= 1 ? 0.16 : 0.24,
   });
+  if (closeCue) {
+    scheduleNoise({
+      start,
+      duration: 0.025,
+      gain: 0.016 + energy * 0.002,
+      bus: state.rhythmGain,
+      filterType: "highpass",
+      freq: 5400,
+      pan,
+    });
+  }
 }
 
-function scheduleTargetTick(start, hit) {
+function scheduleTargetTick(start, hit, targetSongTime = hit.hitTime) {
   const laneNotes = [NOTE.C5, NOTE.E5, NOTE.G5];
-  const root = laneNotes[hit.lane] * (hit.accent ? 2 : 1.5);
-  const pan = (hit.lane - 1) * 0.4;
+  const root = laneNotes[hit.lane] * (hit.accent ? 2.1 : 1.55);
+  const pan = (hit.lane - 1) * 0.42;
+  recordRhythmAudit("target-tick", {
+    lane: hit.lane,
+    hitTime: roundTime(hit.hitTime),
+    targetTickTime: roundTime(targetSongTime),
+    diff: roundTime(targetSongTime - hit.hitTime),
+  });
+  scheduleKickDrum(start, hit.accent ? 0.74 : 0.52);
+  scheduleTone({
+    freq: 118,
+    sweepTo: 64,
+    start,
+    duration: 0.075,
+    gain: hit.accent ? 0.09 : 0.062,
+    type: "sine",
+    bus: state.rhythmGain,
+    attack: 0.0015,
+    release: 0.038,
+    pan,
+  });
   scheduleTone({
     freq: root,
     start,
-    duration: 0.06,
-    gain: hit.accent ? 0.088 : 0.058,
+    duration: 0.074,
+    gain: hit.accent ? 0.12 : 0.084,
     type: "triangle",
     bus: state.rhythmGain,
     attack: 0.002,
-    release: 0.045,
+    release: 0.052,
     pan,
-    send: hit.accent ? 0.26 : 0.16,
+    send: hit.accent ? 0.3 : 0.18,
   });
   scheduleNoise({
     start,
-    duration: 0.026,
-    gain: hit.accent ? 0.028 : 0.018,
+    duration: 0.038,
+    gain: hit.accent ? 0.046 : 0.032,
     bus: state.rhythmGain,
     filterType: "highpass",
-    freq: 6400,
+    freq: 7200,
     pan,
   });
   if (hit.accent) {
@@ -2184,16 +2234,42 @@ function playIncomingCue(ball) {
   const audio = state.audio;
   if (!audio) return;
   const start = audio.currentTime;
-  const laneFreq = 440 + ball.lane * 92;
   const pan = (ball.lane - 1) * 0.35;
-  scheduleTone({ freq: laneFreq, start, duration: 0.055, gain: ball.accent ? 0.055 : 0.035, type: "triangle", bus: state.sfxGain, pan });
-  scheduleTone({ freq: laneFreq * 1.5, start: start + 0.045, duration: 0.05, gain: ball.accent ? 0.04 : 0.025, type: "sine", bus: state.sfxGain, pan });
+  recordRhythmAudit("spawn-sfx", {
+    lane: ball.lane,
+    spawnTime: roundTime(ball.born),
+    hitTime: roundTime(ball.hitTime),
+  });
+  scheduleNoise({
+    start,
+    duration: 0.16,
+    gain: ball.accent ? 0.018 : 0.012,
+    bus: state.sfxGain,
+    filterType: "bandpass",
+    freq: 1700 + ball.lane * 280,
+    q: 1.2,
+    pan,
+    send: 0.08,
+  });
+  scheduleTone({
+    freq: 220 + ball.lane * 42,
+    sweepTo: 150 + ball.lane * 36,
+    start,
+    duration: 0.11,
+    gain: ball.accent ? 0.012 : 0.008,
+    type: "sine",
+    bus: state.sfxGain,
+    attack: 0.006,
+    release: 0.08,
+    pan,
+  });
 }
 
 function playStartFanfare() {
   const audio = state.audio;
   if (!audio) return;
   const start = state.musicStartAt || audio.currentTime;
+  scheduleCountIn(start);
   scheduleKickDrum(start, 1.18);
   [NOTE.A3, NOTE.E4, NOTE.A4, NOTE.C5, NOTE.E5].forEach((freq, i) => {
     scheduleTone({
@@ -2212,6 +2288,34 @@ function playStartFanfare() {
     });
   });
   scheduleNoise({ start: start + BEAT_SECONDS * 1.9, duration: 0.18, gain: 0.035, bus: state.drumGain, filterType: "highpass", freq: 5200, pan: 0.2, send: 0.16 });
+}
+
+function scheduleCountIn(start) {
+  [0, 1, 2, 3].forEach((beat) => {
+    const cueStart = start + beat * BEAT_SECONDS;
+    const strong = beat === 3;
+    recordRhythmAudit("count-in", { beat, cueTime: roundTime(beat * BEAT_SECONDS) });
+    scheduleTone({
+      freq: strong ? NOTE.A5 : NOTE.E5,
+      start: cueStart,
+      duration: strong ? 0.095 : 0.07,
+      gain: strong ? 0.072 : 0.046,
+      type: "triangle",
+      bus: state.rhythmGain,
+      attack: 0.002,
+      release: 0.05,
+      pan: 0,
+      send: 0.16,
+    });
+    scheduleNoise({
+      start: cueStart,
+      duration: strong ? 0.036 : 0.024,
+      gain: strong ? 0.024 : 0.014,
+      bus: state.rhythmGain,
+      filterType: "highpass",
+      freq: strong ? 7200 : 5600,
+    });
+  });
 }
 
 function playAlienIntroSfx(alien) {
@@ -2279,6 +2383,7 @@ function playKickImpactSfx(timing) {
   if (!audio) return;
   const start = audio.currentTime;
   const hard = timing === "hard";
+  recordRhythmAudit("kick-sfx", { timing, audioStart: roundTime(start), songTime: roundTime(getSongTime()) });
   duckMusic(hard ? 0.36 : 0.22, hard ? 0.24 : 0.16);
   scheduleTone({ freq: hard ? 132 : 118, sweepTo: hard ? 72 : 86, start, duration: hard ? 0.12 : 0.08, gain: hard ? 0.16 : 0.1, type: "sine", bus: state.sfxGain, attack: 0.002 });
   scheduleNoise({ start, duration: hard ? 0.09 : 0.055, gain: hard ? 0.09 : 0.045, bus: state.sfxGain, filterType: "bandpass", freq: hard ? 1500 : 1200 });
@@ -2447,6 +2552,14 @@ function spawnBall(cue) {
     spin: Math.random() * Math.PI,
   };
   sceneRef?.createBall(ball);
+  recordRhythmAudit("spawn", {
+    id: ball.id,
+    lane,
+    hitTime: roundTime(ball.hitTime),
+    spawnTime: roundTime(ball.born),
+    expectedSpawnTime: roundTime(ball.hitTime - BALL_LIFE),
+    diff: roundTime(ball.born - (ball.hitTime - BALL_LIFE)),
+  });
   playIncomingCue(ball);
 }
 
@@ -2472,6 +2585,12 @@ function kickAt(clientX) {
     sceneRef.kicker.lockedUntilMs = sceneRef.time.now + 360;
     registerMiss();
     const earlyLate = active ? (active.signedDiff < 0 ? "EARLY" : "LATE") : "WAIT";
+    recordRhythmAudit("miss", {
+      reason: earlyLate,
+      signedDiff: roundTime(active?.signedDiff || -HIT_WINDOW),
+      inputSongTime: roundTime(inputSongTime),
+      hitTime: active ? roundTime(active.ball.hitTime) : null,
+    });
     showJudge(earlyLate, 0x92a9bc, active?.signedDiff || -HIT_WINDOW);
     popFeedback(earlyLate, "#92a9bc");
     playMissSfx();
@@ -2485,6 +2604,17 @@ function kickAt(clientX) {
   active.ball.tapLane = tapLane;
   active.ball.laneMatched = tapLane === active.ball.lane;
   const timing = active.diff <= PERFECT_WINDOW ? "hard" : active.diff <= GOOD_WINDOW ? "good" : "ok";
+  recordRhythmAudit("input", {
+    id: active.ball.id,
+    tapLane,
+    noteLane: active.ball.lane,
+    laneMatched: active.ball.laneMatched,
+    hitTime: roundTime(active.ball.hitTime),
+    inputSongTime: roundTime(inputSongTime),
+    signedDiff: roundTime(active.signedDiff),
+    absDiff: roundTime(active.diff),
+    timing,
+  });
   if (active.ball.laneMatched) {
     showJudge(timing === "hard" ? "PERFECT" : timing === "good" ? "GREAT" : "GOOD", timing === "hard" ? 0xfff6cf : timing === "good" ? 0x41e7ff : 0xa9ff6e, active.signedDiff);
   } else {
@@ -2510,6 +2640,15 @@ function resolveShot(ball, timing) {
     : 0.98;
   const goal = laneMatched && Math.random() > blockChance;
   const shot = createShot(ball, timing, goal, shotLane);
+  recordRhythmAudit("shot", {
+    id: ball.id,
+    lane: ball.lane,
+    shotLane,
+    laneMatched,
+    timing,
+    goal,
+    blockChance: roundTime(blockChance),
+  });
   sceneRef?.alienVisual.playSave(goal, shotLane, timing, laneMatched);
   sceneRef?.alienVisual.emitContactEffect(shot.contactX, shot.contactY, goal, timing);
   sceneRef?.kicker.react(goal);
@@ -2605,6 +2744,29 @@ function registerMiss() {
   state.combo = 0;
   state.lastComboTier = 0;
   sceneRef?.cameras.main.shake(90, 0.005);
+}
+
+function updateAuditAutotap() {
+  if (!autoTapMode || state.mode !== "playing" || !sceneRef) return;
+  const inputSongTime = getInputSongTime();
+  const target = sceneRef.balls
+    .filter((ball) => !ball.hit && !ball.missed && !state.autoTapDone.has(ball.id))
+    .map((ball) => ({ ball, diff: inputSongTime - ball.hitTime }))
+    .filter((entry) => entry.diff >= 0 && entry.diff <= HIT_WINDOW)
+    .sort((a, b) => a.diff - b.diff)[0];
+  if (!target) return;
+
+  state.autoTapDone.add(target.ball.id);
+  const guide = rhythmGuideLayout();
+  const lane = autoTapMode === "wrongLane" ? (target.ball.lane + 1) % guide.laneXs.length : target.ball.lane;
+  recordRhythmAudit("autotap", {
+    id: target.ball.id,
+    mode: autoTapMode,
+    lane,
+    noteLane: target.ball.lane,
+    triggerDiff: roundTime(target.diff),
+  });
+  kickAt(guide.laneXs[lane]);
 }
 
 function updateComboMusicTier() {
@@ -2745,6 +2907,8 @@ function updateGame(dt) {
   const elapsed = Math.max(0, songNow - state.lastSongTime);
   state.lastSongTime = songNow;
   state.beat = songNow;
+  state.songTimeSeconds = songNow;
+  state.musicBeat = songNow / BEAT_SECONDS;
   if (state.hitStopTimer > 0) state.hitStopTimer = Math.max(0, state.hitStopTimer - elapsed);
   state.timeLeft -= elapsed;
 
@@ -2757,6 +2921,7 @@ function updateGame(dt) {
 
   updateMusic();
   updateRhythmFeed();
+  updateAuditAutotap();
 
   for (const ball of sceneRef.balls) {
     if (!ball.hit && !ball.missed && state.beat > ball.hitTime + HIT_WINDOW) {
@@ -2764,6 +2929,14 @@ function updateGame(dt) {
       sceneRef?.kicker.setState("missReact", { force: true });
       sceneRef.kicker.lockedUntilMs = sceneRef.time.now + 320;
       registerMiss();
+      recordRhythmAudit("miss", {
+        reason: "LATE",
+        id: ball.id,
+        lane: ball.lane,
+        hitTime: roundTime(ball.hitTime),
+        songTime: roundTime(state.beat),
+        signedDiff: roundTime(HIT_WINDOW),
+      });
       showJudge("LATE", 0x92a9bc, HIT_WINDOW);
       popFeedback("MISS", "#92a9bc");
       playMissSfx();
@@ -2789,8 +2962,8 @@ function getKickerCue() {
     })
     .sort((a, b) => a.diff - b.diff)[0];
   if (!active) return "idle";
-  if (active.timeToHit <= 0.3 && active.diff <= HIT_WINDOW * 1.4) return "charge";
-  if (active.timeToHit <= 0.75) return "aim";
+  if (active.timeToHit <= BEAT_SECONDS * 0.75) return "charge";
+  if (active.timeToHit <= BEAT_SECONDS * 1.5) return "aim";
   return "idle";
 }
 
